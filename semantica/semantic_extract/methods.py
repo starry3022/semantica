@@ -1311,17 +1311,31 @@ Text to extract from:
         # Convert back to internal Entity format
         entities = []
         for e_out in result_obj.entities:
+            model_metadata = getattr(e_out, "metadata", {})
+            if not isinstance(model_metadata, dict):
+                model_metadata = {}
+            # Keep model annotations as claims, without promoting them to
+            # system provenance, governance approval, or temporal extraction.
+            metadata = {
+                key: value for key, value in model_metadata.items()
+                if key not in (
+                    "valid_from", "valid_until",
+                    "temporal_confidence", "temporal_source_text",
+                    "fact_status", "review_status", "evidence_verified",
+                )
+            }
+            metadata.update({
+                "provider": provider,
+                "model": model,
+                "extraction_method": "llm_typed",
+            })
             entities.append(Entity(
                 text=e_out.text,
                 label=e_out.label,
                 start_char=e_out.start if hasattr(e_out, "start") else 0, # Schema might not force these
                 end_char=e_out.end if hasattr(e_out, "end") else 0,
                 confidence=e_out.confidence,
-                metadata={
-                    "provider": provider, 
-                    "model": model, 
-                    "extraction_method": "llm_typed",
-                }
+                metadata=metadata,
             ))
         
         logger.info(f"Successfully extracted {len(entities)} entities using {provider}/{model} (typed)")
@@ -2296,11 +2310,24 @@ def _parse_relation_result(
                 confidence=0.8, metadata={"synthetic": True},
             )
 
+        model_metadata = item.get("metadata", {})
+        if not isinstance(model_metadata, dict):
+            model_metadata = {}
+        # Temporal provenance and governance state must not come from arbitrary
+        # annotations in the model's metadata object.
         metadata: dict = {
+            key: value for key, value in model_metadata.items()
+            if key not in (
+                "valid_from", "valid_until",
+                "temporal_confidence", "temporal_source_text",
+                "fact_status", "review_status", "evidence_verified",
+            )
+        }
+        metadata.update({
             "provider": provider,
             "model": model,
             "extraction_method": extraction_method,
-        }
+        })
 
         if extract_temporal_bounds:
             temporal_confidence = float(item.get("temporal_confidence") or 0.0)

@@ -53,6 +53,15 @@ import importlib
 from typing import Any, Dict, Tuple
 
 _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
+    # Opt-in normative process rules (existing NER/RE defaults are unchanged)
+    "extract_process_rules": (".process_extractor", "extract_process_rules"),
+    "finalize_process_rules": (".process_extractor", "finalize_process_rules"),
+    "ProcessRule": (".process_schemas", "ProcessRule"),
+    "ProcessExtractionResult": (".process_schemas", "ProcessExtractionResult"),
+    "process_rules_to_graph": (".process_graph", "process_rules_to_graph"),
+    "export_process_rdf": (".process_graph", "export_process_rdf"),
+    "process_rule_ontology": (".process_graph", "process_rule_ontology"),
+    "process_rule_shapes": (".process_graph", "process_rule_shapes"),
     # Named Entity Recognition
     "NamedEntityRecognizer": (".named_entity_recognizer", "NamedEntityRecognizer"),
     "EntityClassifier": (".named_entity_recognizer", "EntityClassifier"),
@@ -153,6 +162,14 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "extract_process_rules",
+    "finalize_process_rules",
+    "ProcessRule",
+    "ProcessExtractionResult",
+    "process_rules_to_graph",
+    "export_process_rdf",
+    "process_rule_ontology",
+    "process_rule_shapes",
     # Named Entity Recognition
     "NamedEntityRecognizer",
     "EntityClassifier",
