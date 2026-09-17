@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import React from "react";
+import { RetainedWorkspace } from "../src/RetainedWorkspace";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
@@ -88,6 +89,21 @@ test.beforeEach(() => {
   globalThis.fetch = async () => response(bundle);
 });
 test.afterEach(cleanup);
+
+test("a retained inactive workspace hides its body portal and restores the chosen supporting evidence on return", async () => {
+  const content = <GraphInspectorPanel {...defaults} nodeId="rule-1" />;
+  const view = render(<RetainedWorkspace active>{content}</RetainedWorkspace>);
+  fireEvent.click(await view.findByRole("button", { name: "Open source material" }));
+  const dialog = view.getByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: /Supporting.*C001/ }));
+  assert.equal(dialog.querySelector("mark")?.textContent, "支持😀条款。");
+  view.rerender(<RetainedWorkspace active={false}>{content}</RetainedWorkspace>);
+  assert.ok(view.queryByRole("dialog") === null, "the body portal must not cover another workspace");
+  view.rerender(<RetainedWorkspace active>{content}</RetainedWorkspace>);
+  const restored = view.getByRole("dialog");
+  assert.equal(restored.querySelector("mark")?.textContent, "支持😀条款。");
+  assert.equal(document.activeElement, within(restored).getByRole("button", { name: "Close source material" }));
+});
 
 test("a rule opens full source text at the second repeated quote using Unicode character offsets", async () => {
   let requested = "";

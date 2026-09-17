@@ -1248,13 +1248,14 @@ function collectPluginOverlays(
 }
 
 interface GraphWorkspaceProps {
+  isActive?: boolean;
   externalFocusNodeId?: string;
   externalFocusToken?: number;
   onOpenOntologyEntity?: (uri: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirtyChange, onOpenOntologyEntity }: GraphWorkspaceProps = {}) {
+export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalFocusToken, onDirtyChange, onOpenOntologyEntity }: GraphWorkspaceProps = {}) {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [focusedNodeId, setFocusedNodeId] = useState("");
   const [lastGroupedSelectedNodeId, setLastGroupedSelectedNodeId] = useState("");
@@ -1833,7 +1834,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   }, [confirmDiscardMarkdownDraft, includeOntologySchema, instanceTypes.snapshot, knowledgeScope.schemaNodeIds, onOpenOntologyEntity, scopedGraph, selectedNodeId, showInstanceTypes, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
 
   useEffect(() => {
-    if (!externalFocusNodeId || externalFocusToken == null) return;
+    if (!isActive || !externalFocusNodeId || externalFocusToken == null) return;
     if (lastExternalFocusTokenRef.current === externalFocusToken) return;
     if (!graphReady || !graph.hasNode(externalFocusNodeId)) return;
     if (
@@ -1857,6 +1858,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     externalFocusNodeId,
     externalFocusToken,
     graphReady,
+    isActive,
     knowledgeScope.schemaNodeIds,
     selectedNodeId,
   ]);
@@ -3145,7 +3147,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     distanceVisualState,
     effectsState,
     temporalState,
-    isLayoutRunning,
+    isLayoutRunning: isActive && isLayoutRunning,
     layoutSource: graphSummary?.layoutSource,
     viewMode,
     showFitViewButton: false,

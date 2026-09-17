@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useContext, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, X } from "lucide-react";
 import { GRAPH_THEME } from "./graphTheme";
 import { evidenceSourceIndex, readSourceView, sourceHighlight, type SourceEvidence, type SourceView } from "./sourceEvidence";
+import { WorkspaceActivityContext } from "../../WorkspaceActivityContext";
 
 interface SourceEvidencePanelProps {
   kind: "node" | "edge";
@@ -70,6 +71,7 @@ function RelationshipSourceSelection({ edgeIds }: { edgeIds: string[] }) {
 }
 
 function SourceMaterialDialog({ view, onClose, initialEvidenceId }: { view: SourceView; onClose: () => void; initialEvidenceId?: string }) {
+  const isActive = useContext(WorkspaceActivityContext);
   const initialEvidence = initialEvidenceId ? view.evidence.find((evidence) => evidence.id === initialEvidenceId) : view.evidence[0];
   const [selectedEvidence, setSelectedEvidence] = useState<SourceEvidence | undefined>(initialEvidence);
   const [sourceIndex, setSourceIndex] = useState(() => initialEvidence ? evidenceSourceIndex(view.sources, initialEvidence) : 0);
@@ -81,14 +83,16 @@ function SourceMaterialDialog({ view, onClose, initialEvidenceId }: { view: Sour
   const textRef = useRef<HTMLPreElement>(null);
   const titleId = useId();
   useEffect(() => {
+    if (!isActive) return;
     const previousFocus = document.activeElement;
     closeRef.current?.focus();
     return () => { if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus(); };
-  }, []);
+  }, [isActive]);
   useEffect(() => {
+    if (!isActive) return;
     if (markRef.current) markRef.current.scrollIntoView?.({ block: "center" });
     else if (textRef.current) textRef.current.scrollTop = 0;
-  }, [sourceIndex, selectedEvidence]);
+  }, [sourceIndex, selectedEvidence, isActive]);
 
   const selectEvidence = (evidence: SourceEvidence) => {
     setSelectedEvidence(evidence);
@@ -101,6 +105,7 @@ function SourceMaterialDialog({ view, onClose, initialEvidenceId }: { view: Sour
     : initialEvidenceId && !initialEvidence
       ? "The requested evidence is unavailable. Select an available citation to locate it."
       : "No evidence selected. Full source material is shown when available.";
+  if (!isActive) return null;
   return createPortal(
     <div style={backdropStyle}>
       <div

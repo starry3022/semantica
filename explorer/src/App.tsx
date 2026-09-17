@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  ArrowLeft,
   ArrowRight,
   BrainCircuit,
   Database,
@@ -19,7 +20,8 @@ import {
 import { ErrorBoundary } from './ErrorBoundary';
 import { ExploreWorkspaceTabs, type ExploreView } from './ExploreWorkspaceTabs';
 import { fetchAgentMemoryAvailability } from './explorerCapabilities';
-import { hasOntologyUrlState, writeEntitySelection } from './workspaces/OntologyWorkspace/ontologyUrlState';
+import { RetainedWorkspace } from './RetainedWorkspace';
+import { useWorkspaceNavigation, type WorkspaceId } from './workspaceNavigation';
 
 const DecisionWorkspace = lazy(() => import('./workspaces/DecisionWorkspace/DecisionWorkspace').then((module) => ({ default: module.DecisionWorkspace })));
 const DiffMergeWorkspace = lazy(() => import('./workspaces/DiffMergeWorkspace/DiffMergeWorkspace').then((module) => ({ default: module.DiffMergeWorkspace })));
@@ -36,7 +38,6 @@ const KGOverviewTab = lazy(() => import('./workspaces/ManageWorkspace/KGOverview
 const OntologySummaryTab = lazy(() => import('./workspaces/ManageWorkspace/OntologySummaryTab').then((module) => ({ default: module.OntologySummaryTab })));
 const OntologyWorkspace = lazy(() => import('./workspaces/OntologyWorkspace').then((module) => ({ default: module.OntologyWorkspace })));
 
-type WorkspaceId = 'welcome' | 'explore' | 'analyze' | 'decisions' | 'enrich' | 'manage' | 'ontology-hub';
 type AnalyzeView = 'sparql' | 'reasoning';
 type EnrichView = 'import' | 'merge' | 'registry' | 'resolve';
 type ManageView = 'lineage' | 'kg-overview' | 'ontology';
@@ -95,10 +96,6 @@ const navItems: NavItem[] = [
   { id: 'manage', label: 'Manage', hint: 'Lineage and governance tooling', icon: Settings2 },
   { id: 'ontology-hub', label: 'Ontology Hub', hint: 'Schema governance, registry, and vocabulary management', icon: GitMerge },
 ];
-
-function readInitialWorkspace(): WorkspaceId {
-  return hasOntologyUrlState() ? 'ontology-hub' : 'welcome';
-}
 
 const shellStyles = `
   :root {
@@ -1780,7 +1777,8 @@ function WelcomeScreen({
 }
 
 export default function App() {
-  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(readInitialWorkspace);
+  const { route, navigate, returnToExplorer } = useWorkspaceNavigation();
+  const activeWorkspace = route.workspace;
   const [exploreView, setExploreView] = useState<ExploreView>('graph');
   const [analyzeView, setAnalyzeView] = useState<AnalyzeView>('reasoning');
   const [enrichView, setEnrichView] = useState<EnrichView>('import');
@@ -1805,47 +1803,45 @@ export default function App() {
   );
 
   const switchExploreView = (nextView: ExploreView) => {
-    if (nextView === exploreView) return;
-    if (!confirmDiscardExploreDraft()) return;
+    if (nextView === exploreView) return true;
+    if (!confirmDiscardExploreDraft()) return false;
     setExploreDraftDirty(false);
     setExploreView(nextView);
+    return true;
+  };
+
+  const openExploreView = (nextView: ExploreView) => {
+    if (switchExploreView(nextView)) navigate('explore');
   };
 
   const switchWorkspace = (nextWorkspace: WorkspaceId) => {
     if (nextWorkspace === activeWorkspace) return;
-    if (activeWorkspace === "explore" && !confirmDiscardExploreDraft()) return;
-    setExploreDraftDirty(false);
-    setActiveWorkspace(nextWorkspace);
+    // Explorer stays mounted, including any unapplied Markdown draft.
+    navigate(nextWorkspace);
   };
 
 
-  const renderWorkspace = () => {
-    if (activeWorkspace === 'welcome') {
+  const renderWorkspace = (workspace: WorkspaceId) => {
+    if (workspace === 'welcome') {
       return (
         <WelcomeScreen
-          onOpenNetwork={() => {
-            setActiveWorkspace('explore');
-            setExploreView('graph');
-          }}
-          onOpenVocabulary={() => {
-            setActiveWorkspace('explore');
-            setExploreView('vocabulary');
-          }}
+          onOpenNetwork={() => openExploreView('graph')}
+          onOpenVocabulary={() => openExploreView('vocabulary')}
           onOpenReasoning={() => {
-            setActiveWorkspace('analyze');
+            navigate('analyze');
             setAnalyzeView('reasoning');
           }}
           onOpenImport={() => {
-            setActiveWorkspace('enrich');
+            navigate('enrich');
             setEnrichView('import');
           }}
-          onOpenDecisions={() => setActiveWorkspace('decisions')}
-          onOpenManage={() => setActiveWorkspace('manage')}
+          onOpenDecisions={() => navigate('decisions')}
+          onOpenManage={() => navigate('manage')}
         />
       );
     }
 
-    if (activeWorkspace === 'explore') {
+    if (workspace === 'explore') {
       return (
         <WorkspaceShell
           title="Explore"
@@ -1864,15 +1860,11 @@ export default function App() {
             <Suspense fallback={<WorkspaceFallback />}>
               {exploreView === 'graph' ? (
                 <GraphWorkspace
+                  isActive={activeWorkspace === 'explore'}
                   externalFocusNodeId={graphFocusRequest?.nodeId}
                   externalFocusToken={graphFocusRequest?.token}
                   onDirtyChange={setExploreDraftDirty}
-                  onOpenOntologyEntity={(uri) => {
-                    if (!confirmDiscardExploreDraft()) return;
-                    writeEntitySelection(uri);
-                    setExploreDraftDirty(false);
-                    setActiveWorkspace('ontology-hub');
-                  }}
+                  onOpenOntologyEntity={(uri) => navigate('ontology-hub', uri)}
                 />
               ) : exploreView === 'memories' ? <MemoryWorkspace onDirtyChange={setExploreDraftDirty} /> : <VocabularyWorkspace />}
             </Suspense>
@@ -1881,7 +1873,7 @@ export default function App() {
       );
     }
 
-    if (activeWorkspace === 'analyze') {
+    if (workspace === 'analyze') {
       return (
         <WorkspaceShell
           title="Analyze"
@@ -1907,7 +1899,7 @@ export default function App() {
       );
     }
 
-    if (activeWorkspace === 'decisions') {
+    if (workspace === 'decisions') {
       return (
         <WorkspaceShell
           title="Decisions"
@@ -1923,7 +1915,7 @@ export default function App() {
       );
     }
 
-    if (activeWorkspace === 'enrich') {
+    if (workspace === 'enrich') {
       return (
         <WorkspaceShell
           title="Enrich"
@@ -1958,21 +1950,23 @@ export default function App() {
       );
     }
 
-    if (activeWorkspace === 'ontology-hub') {
+    if (workspace === 'ontology-hub') {
       return (
         <WorkspaceShell
           title="Ontology Hub"
           subtitle="Load, browse, edit, and govern ontologies and vocabularies."
           kicker="Schema Governance"
           compact
+          tabs={route.canReturnToExplorer ? <button className="workspace-tab" onClick={returnToExplorer}><ArrowLeft size={14} />Back to Explorer</button> : undefined}
         >
           <ErrorBoundary key="ontology-hub">
             <Suspense fallback={<WorkspaceFallback />}>
               <OntologyWorkspace
+                key={route.key}
                 onJumpToGraphNode={(nodeId: string) => {
-                  setGraphFocusRequest({ nodeId, token: Date.now() });
-                  setActiveWorkspace('explore');
-                  setExploreView('graph');
+                  if (!switchExploreView('graph')) return;
+                  setGraphFocusRequest(current => ({ nodeId, token: (current?.token || 0) + 1 }));
+                  navigate('explore');
                 }}
               />
             </Suspense>
@@ -2004,10 +1998,7 @@ export default function App() {
           <Suspense fallback={<WorkspaceFallback />}>
             {manageView === 'lineage' ? <LineageDiagram /> :
              manageView === 'kg-overview' ? <KGOverviewTab /> :
-             <OntologySummaryTab onOpenVocabularyBrowser={() => {
-               setActiveWorkspace('explore');
-               setExploreView('vocabulary');
-             }} />}
+             <OntologySummaryTab onOpenVocabularyBrowser={() => openExploreView('vocabulary')} />}
           </Suspense>
         </ErrorBoundary>
       </WorkspaceShell>
@@ -2033,7 +2024,12 @@ export default function App() {
             </button>
           ))}
         </aside>
-        {renderWorkspace()}
+        <div style={{ flex: 1, minWidth: 0, position: 'relative', display: 'flex' }}>
+          <RetainedWorkspace active={activeWorkspace === 'explore'}>
+            {renderWorkspace('explore')}
+          </RetainedWorkspace>
+          {activeWorkspace !== 'explore' ? renderWorkspace(activeWorkspace) : null}
+        </div>
       </div>
     </QueryClientProvider>
   );

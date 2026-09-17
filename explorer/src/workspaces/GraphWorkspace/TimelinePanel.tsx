@@ -1,10 +1,11 @@
-﻿import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+﻿import { useContext, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { DataSet } from "vis-data";
 import { Timeline } from "vis-timeline";
 import type { TimelineOptions } from "vis-timeline";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 import { GRAPH_THEME } from "./graphTheme";
 import { DEFAULT_MIN_DATE, resolvePlayStepMs, resolveScrubberBounds } from "./temporalScrubberBounds";
+import { WorkspaceActivityContext } from "../../WorkspaceActivityContext";
 
 export interface TimelinePanelProps {
   onTimeChange: (time: Date) => void;
@@ -58,6 +59,7 @@ function formatPlayheadLabel(value: Date): string {
 }
 
 export function TimelinePanel({ onTimeChange, minDate, maxDate }: TimelinePanelProps) {
+  const isActive = useContext(WorkspaceActivityContext);
   const containerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<Timeline | null>(null);
   const playheadRef = useRef<Date>(DEFAULT_MIN_DATE);
@@ -158,7 +160,11 @@ export function TimelinePanel({ onTimeChange, minDate, maxDate }: TimelinePanelP
     });
   }, [startPlay, stopPlay]);
 
-  useEffect(() => () => stopPlay(), [stopPlay]);
+  useEffect(() => {
+    if (isActive && isPlaying) startPlay();
+    else stopPlay();
+    return stopPlay;
+  }, [isActive, isPlaying, startPlay, stopPlay]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "90px", borderTop: `1px solid ${GRAPH_THEME.ui.timeline.border}`, background: GRAPH_THEME.ui.timeline.background, backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", display: "flex", alignItems: "stretch", flexShrink: 0 }}>

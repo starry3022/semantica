@@ -271,8 +271,17 @@ ontologies. Legacy resources without explicit schema types are kept visible.
 
 Select an instance, rule or evidence node to see **Declared class** in its
 inspector. Each entry shows its exact class IRI, label and declaration basis.
-**Open class** opens the definition in Ontology Hub. There, **Declared instances**
-lists matching nodes and **Open instance** returns to the knowledge graph.
+**Open class** navigates within the app to Ontology Hub, selecting and centering
+the class on the canvas as well as opening its definition. **Back to Explorer**,
+browser Back, or the Knowledge Explorer sidebar entry restores the existing
+Explorer canvas, camera, selected node, view mode, filters, search and unapplied
+Markdown draft. Browser Forward reopens the linked class. Explorer layout and
+timeline playback pause while its workspace is inactive; an open source dialog
+hides with the workspace and restores its evidence selection on return.
+This state is retained for the current page
+session; refreshing the page does not restore the Explorer camera or draft.
+There, **Declared instances** lists matching nodes and **Open instance** explicitly
+focuses that instance in the knowledge graph.
 Both directions share one resolver, including multiple declared types.
 
 **Show class links** adds only the selected node's class references and type

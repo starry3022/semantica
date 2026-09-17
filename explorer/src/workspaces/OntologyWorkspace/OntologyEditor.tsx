@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,7 +11,7 @@ import {
   Handle,
   Position,
 } from "@xyflow/react";
-import type { Connection, Edge, Node, ReactFlowInstance } from "@xyflow/react";
+import type { Connection, Edge, Node, OnEdgesChange, OnNodesChange, ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Plus,
@@ -40,6 +40,7 @@ import {
 } from "./ontologyEditorModel";
 import type { EditorEntityType, RegistryEntry } from "./ontologyEditorModel";
 import { clearEntitySelection, readOntologyUrlState, writeEntitySelection } from "./ontologyUrlState";
+import { useOntologySelectionFocus, type OntologyFocusRequest } from "./useOntologySelectionFocus";
 
 type OntologyNodeData = {
   label?: string;
@@ -52,8 +53,8 @@ type OntologyNode = Node<OntologyNodeData>;
 type OntologyEdge = Edge<Record<string, unknown>>;
 
 const nodeTypes = {
-  classNode: ({ data }: { data: OntologyNodeData }) => (
-    <div style={classNodeStyle}>
+  classNode: ({ data, selected }: { data: OntologyNodeData; selected?: boolean }) => (
+    <div data-ontology-selected={selected || undefined} style={selected ? { ...classNodeStyle, border: "1px solid #f2b66d", boxShadow: "0 0 0 2px rgba(242, 182, 109, 0.45), 0 4px 18px rgba(0, 0, 0, 0.35)" } : classNodeStyle}>
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div style={classNodeHeader}>{data.label}</div>
       <div style={classNodeSub}>{data.type}</div>
@@ -224,10 +225,16 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
   const [nodes, setNodes, onNodesChange] = useNodesState<OntologyNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<OntologyEdge>([]);
   const [selectedElement, setSelectedElement] = useState<OntologyNode | OntologyEdge | null>(null);
-  const hasDetailPanel = selectedElement !== null;
+  const selectedNodeId = selectedElement && !("source" in selectedElement) ? selectedElement.id : "";
+  const selectedEdgeId = selectedElement && "source" in selectedElement ? selectedElement.id : "";
+  const displayedNodes = useMemo(() => nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })), [nodes, selectedNodeId]);
+  const displayedEdges = useMemo(() => edges.map((edge) => ({ ...edge, selected: edge.id === selectedEdgeId })), [edges, selectedEdgeId]);
   const [registry, setRegistry] = useState<RegistryEntry[]>([]);
   const [ontologyUri, setOntologyUri] = useState<string>("");
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<OntologyNode, OntologyEdge> | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [focusRequest, setFocusRequest] = useState<OntologyFocusRequest | null>(null);
+  useOntologySelectionFocus(flowInstance, nodes, focusRequest, canvasRef);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState("");
   const [schema, setSchema] = useState<{ nodes: OntologyGraphNode[]; edges: OntologyGraphEdge[] }>({ nodes: [], edges: [] });
@@ -313,7 +320,9 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
         setNodes(elements.nodes);
         setEdges(elements.edges);
         const requested = requestedEntityUri();
-        setSelectedElement(elements.nodes.find((node) => node.id === requested) || null);
+        const selected = elements.nodes.find((node) => node.id === requested) || null;
+        setSelectedElement(selected);
+        setFocusRequest((current) => current || { nodeId: selected?.id || null });
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -328,14 +337,6 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
 
     return () => controller.abort();
   }, [ontologyUri, setEdges, setNodes, graphRevision]);
-
-  useEffect(() => {
-    if (!flowInstance || nodes.length === 0) return;
-    const frame = window.requestAnimationFrame(() => {
-      void flowInstance.fitView({ padding: 0.22, duration: 320, maxZoom: 1.25 });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [flowInstance, hasDetailPanel, nodes.length, ontologyUri]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed } }, eds)),
@@ -409,8 +410,42 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
 
   const selectNode = useCallback((node: OntologyNode) => {
     setSelectedElement(node);
+    setFocusRequest({ nodeId: node.id });
     writeEntitySelection(node.id);
   }, []);
+
+  const handleNodesChange: OnNodesChange<OntologyNode> = useCallback((changes) => {
+    onNodesChange(changes);
+    const selected = changes.find((change) => change.type === "select" && change.selected);
+    if (selected?.type === "select") {
+      const node = nodes.find((candidate) => candidate.id === selected.id);
+      if (node) {
+        setSelectedElement(node);
+        writeEntitySelection(node.id);
+      }
+    } else if (changes.some((change) => change.type === "select" && change.id === selectedNodeId && !change.selected)) {
+      setSelectedElement(null);
+      setFocusRequest(null);
+      clearEntitySelection();
+    }
+  }, [nodes, onNodesChange, selectedNodeId]);
+
+  const handleEdgesChange: OnEdgesChange<OntologyEdge> = useCallback((changes) => {
+    onEdgesChange(changes);
+    const selected = changes.find((change) => change.type === "select" && change.selected);
+    if (selected?.type === "select") {
+      const edge = edges.find((candidate) => candidate.id === selected.id);
+      if (edge) {
+        setSelectedElement(edge);
+        setFocusRequest(null);
+        clearEntitySelection();
+      }
+    } else if (changes.some((change) => change.type === "select" && change.id === selectedEdgeId && !change.selected)) {
+      setSelectedElement(null);
+      setFocusRequest(null);
+      clearEntitySelection();
+    }
+  }, [edges, onEdgesChange, selectedEdgeId]);
 
   const saveDraft = useCallback(async () => {
     if (!ontologyUri) {
@@ -443,13 +478,14 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
 
   const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: OntologyNode) => {
     event.preventDefault();
-    setSelectedElement(node);
+    selectNode(node);
     setShowContext({ x: event.clientX, y: event.clientY, type: "node", element: node });
-  }, []);
+  }, [selectNode]);
 
   const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: OntologyEdge) => {
     event.preventDefault();
     setSelectedElement(edge);
+    setFocusRequest(null);
     setShowContext({ x: event.clientX, y: event.clientY, type: "edge", element: edge });
   }, []);
 
@@ -469,6 +505,7 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
           : { ...prev, removed_classes: [...prev.removed_classes, target.id] });
       }
       setSelectedElement(null);
+      setFocusRequest(null);
     }
     setShowContext(null);
   }, [selectedElement, setNodes, setEdges, showContext]);
@@ -573,6 +610,7 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
   const changeOntology = (uri: string) => {
     setOntologyUri(uri);
     setSelectedElement(null);
+    setFocusRequest(null);
     setShowContext(null);
     setUnownedEntity("");
     setEditing(false);
@@ -646,24 +684,24 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenc
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
-        <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}>
+        <div ref={canvasRef} style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}>
           <ReactFlow
             className="ontology-editor-flow"
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            nodes={displayedNodes}
+            edges={displayedEdges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
             onConnect={readOnly ? undefined : onConnect}
             nodesDraggable={!readOnly}
             nodesConnectable={!readOnly}
             deleteKeyCode={readOnly ? null : "Backspace"}
             onInit={setFlowInstance}
             onNodeClick={(_, node) => selectNode(node)}
-            onEdgeClick={(_, edge) => setSelectedElement(edge)}
+            onEdgeClick={(_, edge) => { setSelectedElement(edge); setFocusRequest(null); }}
+            onPaneClick={() => { setSelectedElement(null); setFocusRequest(null); clearEntitySelection(); }}
             onNodeContextMenu={readOnly ? undefined : handleNodeContextMenu}
             onEdgeContextMenu={readOnly ? undefined : handleEdgeContextMenu}
             nodeTypes={nodeTypes}
-            fitView
             style={{ background: "#07111f" }}
           >
             <Background color="#1a2d3d" gap={20} />

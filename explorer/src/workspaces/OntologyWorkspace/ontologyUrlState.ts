@@ -41,6 +41,13 @@ export function removeEntitySelection(search: string): string {
   return `?${params.toString()}`;
 }
 
+export function removeOntologyUrlState(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete(TAB_PARAM);
+  params.delete(ENTITY_PARAM);
+  return `?${params.toString()}`;
+}
+
 /**
  * Deliberately dual-role, and the argument is what selects the role: given a
  * `search` string this is pure and total, delegating straight to
@@ -72,7 +79,7 @@ export function hasOntologyUrlState(search?: string): boolean {
 function updateSearch(transform: (search: string) => string): void {
   try {
     window.history.replaceState(
-      null,
+      window.history.state,
       "",
       `${transform(window.location.search)}${window.location.hash}`,
     );
