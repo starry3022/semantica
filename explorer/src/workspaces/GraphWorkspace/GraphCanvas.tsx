@@ -2454,6 +2454,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         ? `display:${graphVersion}:${viewMode}`
         : `store:${displayMeta.layoutMode}`;
       const currentTargetKey = (fa2Ref.current as (FA2Layout & { __targetKey?: string }) | null)?.__targetKey;
+      const currentTargetGraph = (fa2Ref.current as (FA2Layout & { __targetGraph?: typeof layoutTargetGraph }) | null)?.__targetGraph;
 
       if (!isLayoutRunning) {
         fa2Ref.current?.stop();
@@ -2472,13 +2473,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         return;
       }
 
-      if (!fa2Ref.current || currentTargetKey !== targetKey) {
+      if (!fa2Ref.current || currentTargetKey !== targetKey || currentTargetGraph !== layoutTargetGraph) {
         fa2Ref.current?.kill();
         const nextLayout = new FA2Layout(
           layoutTargetGraph,
           usingGroupedOwnedLayout ? GROUPED_FA2_SETTINGS : FA2_SETTINGS,
-        ) as FA2Layout & { __targetKey?: string };
+        ) as FA2Layout & { __targetKey?: string; __targetGraph?: typeof layoutTargetGraph };
         nextLayout.__targetKey = targetKey;
+        nextLayout.__targetGraph = layoutTargetGraph;
         fa2Ref.current = nextLayout;
         debugGraphRuntime("layout-target-changed", {
           graphVersion,

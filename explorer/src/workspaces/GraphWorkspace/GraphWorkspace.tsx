@@ -30,6 +30,8 @@ import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import { buildGraphColorLegend, type GraphColorLegendItem } from "./graphColorLegend";
 import { createKnowledgeGraphScope } from "./graphSchemaScope";
+import { projectInstanceTypes } from "./instanceTypeProjection";
+import { useInstanceTypes } from "./useInstanceTypes";
 import { focusedUnavailableReasonText, groupedViewReasonText } from "./graphViewCopy";
 import { localGraphRequiresDraftConfirm } from "./localGraphTransition";
 import { buildHeatmapRenderSnapshot, buildStructuralDistanceSnapshot, checkGroupedViewAvailability, getDistanceBandColor, resolveDisplayGraph, resolveDisplayStateSnapshot, resolveGroupedDisplayNodeId, resolveGroupedDisplayStateSnapshot, summarizeDistanceBuckets } from "./graphSceneState";
@@ -1248,10 +1250,11 @@ function collectPluginOverlays(
 interface GraphWorkspaceProps {
   externalFocusNodeId?: string;
   externalFocusToken?: number;
+  onOpenOntologyEntity?: (uri: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirtyChange }: GraphWorkspaceProps = {}) {
+export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirtyChange, onOpenOntologyEntity }: GraphWorkspaceProps = {}) {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [focusedNodeId, setFocusedNodeId] = useState("");
   const [lastGroupedSelectedNodeId, setLastGroupedSelectedNodeId] = useState("");
@@ -1260,6 +1263,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   const [graphReady, setGraphReady] = useState(false);
   const [graphVersion, setGraphVersion] = useState(0);
   const [includeOntologySchema, setIncludeOntologySchema] = useState(false);
+  const [typeLinksSelection, setTypeLinksSelection] = useState<{ nodeId: string; version: number } | null>(null);
   const [markdownDraftDirty, setMarkdownDraftDirty] = useState(false);
   const markdownRefreshGuard = useMemo(() => new NodeMarkdownRefreshGuard(), []);
   const handleMarkdownDirtyChange = useCallback((dirty: boolean) => {
@@ -1635,6 +1639,14 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     [pluginRuntimeVersion, resolveNodeIdForFocusedMode, selectedNodeId, viewMode],
   );
   const inspectableNodeId = focusedSelectionResolution.resolvedNodeId ?? "";
+  const typeNodeId = selectedNodeId === inspectableNodeId && !knowledgeScope.schemaNodeIds.has(selectedNodeId) ? selectedNodeId : "";
+  const instanceTypes = useInstanceTypes(typeNodeId, graphVersion);
+  const showInstanceTypes = Boolean(typeNodeId && typeLinksSelection?.nodeId === typeNodeId && typeLinksSelection.version === graphVersion);
+  const handleShowInstanceTypes = useCallback((enabled: boolean) => {
+    setTypeLinksSelection(enabled ? { nodeId: typeNodeId, version: graphVersion } : null);
+    setSelectedEdgeId("");
+    if (enabled) setIsLayoutRunning(false);
+  }, [typeNodeId, graphVersion]);
   const canActivateFocusedMode = Boolean(focusedSelectionResolution.resolvedNodeId);
   const { available: groupedViewAvailable, reason: groupedViewReason } = useMemo(
     () => checkGroupedViewAvailability(scopedGraph),
@@ -1782,6 +1794,11 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   ]);
 
   const focusNode = useCallback((nodeId: string) => {
+    const classReference = showInstanceTypes && instanceTypes.snapshot?.types.find(type => type.class_uri === nodeId);
+    if (classReference) {
+      if (classReference.loaded) onOpenOntologyEntity?.(classReference.class_uri);
+      return;
+    }
     if (nodeId !== selectedNodeId && !confirmDiscardMarkdownDraft()) return;
     if (!nodeId) {
       setSelectedNodeId("");
@@ -1813,7 +1830,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       setFocusedNodeId(nextSelectedNodeId);
       setIsLayoutRunning(false);
     }
-  }, [confirmDiscardMarkdownDraft, includeOntologySchema, knowledgeScope.schemaNodeIds, scopedGraph, selectedNodeId, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
+  }, [confirmDiscardMarkdownDraft, includeOntologySchema, instanceTypes.snapshot, knowledgeScope.schemaNodeIds, onOpenOntologyEntity, scopedGraph, selectedNodeId, showInstanceTypes, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
 
   useEffect(() => {
     if (!externalFocusNodeId || externalFocusToken == null) return;
@@ -2330,7 +2347,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   }, [collapsedNeighborhoodNodeIds, focusedNodeId, scopedGraph, selectedNodeId, viewMode]);
   const structuralActivePath = structuralSelectedNodeId ? activePath : EMPTY_PATH;
   const structuralActivePathEdgeIds = structuralSelectedNodeId ? activePathEdgeIds : EMPTY_PATH;
-  const displayResult = useMemo(() => {
+  const baseDisplayResult = useMemo(() => {
     // The displayed graph is an aggregated clone. Rebuild it after domain
     // mutations so applied Markdown labels do not remain stale on the canvas.
     void graphVersion;
@@ -2356,12 +2373,16 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     structuralSelectedNodeId,
     viewMode,
   ]);
+  const displayResult = useMemo(() => projectInstanceTypes(
+    baseDisplayResult, showInstanceTypes ? instanceTypes.snapshot : null, graph,
+  ), [baseDisplayResult, instanceTypes.snapshot, showInstanceTypes]);
+  const hiddenSchemaCount = knowledgeScope.hiddenNodeCount - [...displayResult.classReferences].filter(id => knowledgeScope.schemaNodeIds.has(id) && !scopedGraph.hasNode(id)).length;
   const colorLegendItems = useMemo(() => {
     // Store mutations can preserve graph identity while changing its attributes.
     void graphVersion;
     return buildGraphColorLegend(displayResult.graph);
   }, [displayResult.graph, graphVersion]);
-  const displayState = useMemo(
+  const baseDisplayState = useMemo(
     () => (
       viewMode === "grouped"
         ? resolveGroupedDisplayStateSnapshot(displayResult.graph, selectedNodeId, {
@@ -2397,6 +2418,10 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       viewMode,
     ],
   );
+  const displayState = useMemo(() => displayResult.links.size === 0 ? baseDisplayState : ({
+    ...baseDisplayState,
+    selectedVisibleNeighborIds: [...new Set([...baseDisplayState.selectedVisibleNeighborIds, ...[...displayResult.links.values()].map(type => type.class_uri)])],
+  }), [baseDisplayState, displayResult.links]);
   const displayMeta = displayResult.meta;
   useEffect(() => {
     if (viewMode === "grouped" && !groupedViewAvailable) {
@@ -2474,9 +2499,10 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     [displayState, scopedGraph, selectedNodeId, summary?.nodeCount, summary?.edgeCount],
   );
   const selectedEdgeState = useMemo(
-    () => buildSelectedEdgeState(selectedEdgeId, displayResult.graph),
-    [displayResult.graph, selectedEdgeId, summary?.nodeCount, summary?.edgeCount],
+    () => displayResult.links.has(selectedEdgeId) ? null : buildSelectedEdgeState(selectedEdgeId, displayResult.graph),
+    [displayResult.graph, displayResult.links, selectedEdgeId, summary?.nodeCount, summary?.edgeCount],
   );
+  const selectedTypeLink = displayResult.links.get(selectedEdgeId);
   const temporalState = useMemo(
     () => ({
       currentTime: scrubberTime,
@@ -3193,9 +3219,10 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                       <MetricChip>{graph.order.toLocaleString()} nodes · {graph.size.toLocaleString()} edges total</MetricChip>
                     </>
                   ) : null}
-                  {knowledgeScope.hiddenNodeCount > 0 ? (
-                    <MetricChip>{knowledgeScope.hiddenNodeCount.toLocaleString()} schema nodes hidden</MetricChip>
+                  {hiddenSchemaCount > 0 ? (
+                    <MetricChip>{hiddenSchemaCount.toLocaleString()} schema nodes hidden</MetricChip>
                   ) : null}
+                  {displayResult.links.size > 0 ? <MetricChip>{displayResult.links.size} class links · view only</MetricChip> : null}
                   {activeNodeCount !== null ? (
                     <MetricChip tone="success">{activeNodeCount.toLocaleString()} active</MetricChip>
                   ) : null}
@@ -3327,6 +3354,18 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                 </div>
               ) : null}
 
+              {selectedTypeLink ? (
+                <section aria-label="Selected class link" style={selectedEdgeCardStyle}>
+                  <strong>Declared class · instance of</strong>
+                  <div>{selectedNodeState?.label || typeNodeId} → {selectedTypeLink.label}</div>
+                  <div style={{ overflowWrap: "anywhere" }}>{selectedTypeLink.class_uri}</div>
+                  <p>This link displays a type declaration. It does not indicate business review or approval.</p>
+                  <button style={selectedEdgeNodeChipStyle} disabled={!selectedTypeLink.loaded} onClick={() => onOpenOntologyEntity?.(selectedTypeLink.class_uri)}>
+                    {selectedTypeLink.loaded ? `Open class ${selectedTypeLink.label}` : "Class definition not loaded"}
+                  </button>
+                  <button style={secondaryActionButtonStyle} onClick={() => setSelectedEdgeId("")}>Close class link</button>
+                </section>
+              ) : null}
               {selectedEdgeState ? (
                 <div style={selectedEdgeCardStyle}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
@@ -3488,6 +3527,12 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                       pathResult={pathResult}
                       onDownloadProvenance={(format) => void handleDownloadProvenance(format)}
                       onFocusNode={focusNode}
+                      instanceTypes={typeNodeId ? instanceTypes.snapshot : undefined}
+                      instanceTypesLoading={instanceTypes.loading}
+                      instanceTypesError={instanceTypes.error}
+                      showInstanceTypes={showInstanceTypes}
+                      onShowInstanceTypes={handleShowInstanceTypes}
+                      onOpenOntologyEntity={onOpenOntologyEntity}
                       onMarkdownApplied={handleMarkdownApplied}
                       onMarkdownDirtyChange={handleMarkdownDirtyChange}
                     />

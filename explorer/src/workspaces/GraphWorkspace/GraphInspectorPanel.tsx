@@ -6,6 +6,8 @@ import type { FocusedUnavailableReason, GraphSelectedNodeKind } from "./types";
 import { focusedUnavailableReasonText } from "./graphViewCopy";
 import { MarkdownContentViewer } from "./MarkdownContentViewer";
 import { SourceEvidencePanel } from "./SourceEvidencePanel";
+import { InstanceTypesPanel } from "./InstanceTypesPanel";
+import type { InstanceTypesSnapshot } from "./instanceTypes";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 
 export type LinkPrediction = {
@@ -49,6 +51,12 @@ export interface GraphInspectorPanelProps {
   onFocusNode?: (nodeId: string) => void;
   onMarkdownApplied?: (result: MarkdownApplyResult) => void;
   onMarkdownDirtyChange?: (dirty: boolean) => void;
+  instanceTypes?: InstanceTypesSnapshot | null;
+  instanceTypesLoading?: boolean;
+  instanceTypesError?: string | null;
+  showInstanceTypes?: boolean;
+  onShowInstanceTypes?: (enabled: boolean) => void;
+  onOpenOntologyEntity?: (uri: string) => void;
 }
 
 const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
@@ -311,6 +319,12 @@ export function GraphInspectorPanel({
   onFocusNode,
   onMarkdownApplied,
   onMarkdownDirtyChange,
+  instanceTypes,
+  instanceTypesLoading = false,
+  instanceTypesError = null,
+  showInstanceTypes = false,
+  onShowInstanceTypes,
+  onOpenOntologyEntity,
 }: GraphInspectorPanelProps) {
   if (!nodeId) {
     return (
@@ -420,6 +434,16 @@ export function GraphInspectorPanel({
           {attributes?.valid_until ? <div>until: {attributes.valid_until}</div> : null}
         </div>
       ) : null}
+
+      {instanceTypes !== undefined ? <InstanceTypesPanel
+        nodeId={effectiveNodeId}
+        snapshot={instanceTypes}
+        loading={instanceTypesLoading}
+        error={instanceTypesError}
+        showTypes={showInstanceTypes}
+        onShowTypes={onShowInstanceTypes}
+        onOpenOntologyEntity={onOpenOntologyEntity}
+      /> : null}
 
       <SourceEvidencePanel kind="node" id={effectiveNodeId} />
 

@@ -200,7 +200,7 @@ different content hashes for one source ID.
 SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
   --graph /path/to/artifacts/candidate-graph.json \
   --source-manifest /path/to/artifacts/sources.json \
-  --host 127.0.0.1 --port 8013 --no-browser
+  --host 127.0.0.1 --port 8015 --no-browser
 ```
 
 The candidate graph contains rule instances. Each new Explorer session needs an
@@ -223,7 +223,7 @@ import urllib.request
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
-base_url = "http://127.0.0.1:8013"
+base_url = "http://127.0.0.1:8015"
 
 def post(path, payload):
     request = urllib.request.Request(
@@ -268,6 +268,37 @@ separate the visible graph from the complete session. Searching for a schema
 term enables that scope explicitly; turning it off clears hidden selections.
 This display projection does not delete triples, map instance types or merge
 ontologies. Legacy resources without explicit schema types are kept visible.
+
+Select an instance, rule or evidence node to see **Declared class** in its
+inspector. Each entry shows its exact class IRI, label and declaration basis.
+**Open class** opens the definition in Ontology Hub. There, **Declared instances**
+lists matching nodes and **Open instance** returns to the knowledge graph.
+Both directions share one resolver, including multiple declared types.
+
+**Show class links** adds only the selected node's class references and type
+links to the displayed graph, pausing the current layout for inspection. Use
+**Focus** for a closer view or **Run** to rearrange it. Clicking a loaded class
+reference opens its definition. These links do not add edges to storage or RDF;
+visible counts identify them as view-only links. Changing the selected node or
+graph revision clears the previous projection and class response.
+
+**Related business concepts via evidence** is separate from class membership.
+It reuses registered, validated source citations for ProcessRule and Evidence
+nodes. A rule about procurement remains a `ProcessRule`; a shared citation to
+`PurchaseRequest` does not make it an observed purchase request or an approved
+business fact. Candidate and review statuses remain unchanged.
+
+The read-only `/api/ontology/instance-types?node_id=...` and
+`/api/ontology/class-instances?class_uri=...&skip=0&limit=100` endpoints resolve
+explicit RDF type edges/properties and absolute node type IRIs. Local node types
+are qualified only by a valid source graph `metadata.base_uri`, using the same
+namespace rule as the process RDF exporter. JSON graph loading and saving retain
+that metadata; replacing the graph with legacy JSON or Markdown clears it.
+The current Markdown format does not persist graph-level namespace metadata.
+Labels, neighboring nodes and similarly named classes never supply a guessed
+mapping. Missing declarations show **Unmapped**; missing class definitions retain
+the declared IRI and show **Definition not loaded**. These APIs do not implement
+business-type inference, mapping governance or SPARQL projection equivalence.
 
 Selecting a class shows **Declared properties**, **Inherited properties** from
 loaded parent-class declarations, and a separate **Referenced as range** group.

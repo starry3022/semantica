@@ -19,7 +19,7 @@ import {
 import { ErrorBoundary } from './ErrorBoundary';
 import { ExploreWorkspaceTabs, type ExploreView } from './ExploreWorkspaceTabs';
 import { fetchAgentMemoryAvailability } from './explorerCapabilities';
-import { hasOntologyUrlState } from './workspaces/OntologyWorkspace/ontologyUrlState';
+import { hasOntologyUrlState, writeEntitySelection } from './workspaces/OntologyWorkspace/ontologyUrlState';
 
 const DecisionWorkspace = lazy(() => import('./workspaces/DecisionWorkspace/DecisionWorkspace').then((module) => ({ default: module.DecisionWorkspace })));
 const DiffMergeWorkspace = lazy(() => import('./workspaces/DiffMergeWorkspace/DiffMergeWorkspace').then((module) => ({ default: module.DiffMergeWorkspace })));
@@ -1867,6 +1867,12 @@ export default function App() {
                   externalFocusNodeId={graphFocusRequest?.nodeId}
                   externalFocusToken={graphFocusRequest?.token}
                   onDirtyChange={setExploreDraftDirty}
+                  onOpenOntologyEntity={(uri) => {
+                    if (!confirmDiscardExploreDraft()) return;
+                    writeEntitySelection(uri);
+                    setExploreDraftDirty(false);
+                    setActiveWorkspace('ontology-hub');
+                  }}
                 />
               ) : exploreView === 'memories' ? <MemoryWorkspace onDirtyChange={setExploreDraftDirty} /> : <VocabularyWorkspace />}
             </Suspense>

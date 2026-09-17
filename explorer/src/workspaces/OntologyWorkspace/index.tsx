@@ -82,7 +82,7 @@ export function OntologyWorkspace({ onJumpToGraphNode }: OntologyWorkspaceProps)
       case "registry":
         return <OntologyManager />;
       case "editor":
-        return <OntologyEditor evidenceContext={evidenceContext || undefined} />;
+        return <OntologyEditor evidenceContext={evidenceContext || undefined} onJumpToGraphNode={onJumpToGraphNode} />;
       case "versions":
         return <VersionsTab />;
       case "alignments":

@@ -371,6 +371,15 @@ def _resolve_edge_identity(
     return resolved_edge_id, resolved_family_id
 
 
+def _copy_graph_metadata(value: Any) -> Dict[str, Any]:
+    """Validate optional graph declarations without retaining caller aliases."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Graph metadata must be an object or null")
+    return copy.deepcopy(value)
+
+
 def _coerce_metadata_map(*values: Any) -> Dict[str, Any]:
     merged: Dict[str, Any] = {}
     for value in values:
@@ -601,6 +610,7 @@ class ContextGraph:
         self._lock = threading.RLock()
 
         self.graph_id: str = str(uuid.uuid4())
+        self.metadata: Dict[str, Any] = {}
 
         self.nodes: Dict[str, ContextNode] = {}
         self.edges: List[ContextEdge] = []
@@ -1394,6 +1404,7 @@ class ContextGraph:
                 "nodes": [node.to_dict() for node in self.nodes.values()],
                 "edges": [edge.to_dict() for edge in self.edges],
                 "links": links_data,
+                **({"metadata": copy.deepcopy(self.metadata)} if self.metadata else {}),
             }
 
         # Write atomically: serialize to a sibling temp file then replace the
@@ -1467,8 +1478,10 @@ class ContextGraph:
         elif not isinstance(data, dict):
             raise ValueError("Graph file must contain a JSON object or array payload")
 
+        metadata = _copy_graph_metadata(data.get("metadata"))
         with self._lock:
             # Clear existing
+            self.metadata = metadata
             self.nodes.clear()
             self.edges.clear()
             self._edge_index.clear()
@@ -1843,6 +1856,8 @@ class ContextGraph:
 
         with self._lock:
             self.graph_id = graph_id
+            # The current Markdown format has no graph-level declarations.
+            self.metadata = {}
             self.nodes.clear()
             self.nodes.update(nodes_by_id)
             self.edges.clear()
@@ -3049,6 +3064,7 @@ class ContextGraph:
     def clear(self) -> None:
         """Fully reset the graph state and indexes."""
         with self._lock:
+            self.metadata = {}
             self.nodes.clear()
             self.edges.clear()
             self._edge_index.clear()
@@ -3578,6 +3594,7 @@ class ContextGraph:
             return {
                 "nodes": nodes_out,
                 "edges": edges_out,
+                **({"metadata": copy.deepcopy(self.metadata)} if self.metadata else {}),
                 "statistics": {
                     "node_count": len(self.nodes),
                     "edge_count": len(self.edges),
@@ -3677,6 +3694,7 @@ class ContextGraph:
 
     def from_dict(self, graph_dict: Dict[str, Any]) -> None:
         """Load graph from dictionary format."""
+        metadata = _copy_graph_metadata(graph_dict.get("metadata"))
         # Clear existing graph
         self.clear()
 
@@ -3724,6 +3742,8 @@ class ContextGraph:
 
         # Rebuild derived decision indexes from the now-populated node store.
         self._rebuild_decision_indexes()
+        with self._lock:
+            self.metadata = metadata
 
     def state_at(self, timestamp: Union[str, int, float, datetime]) -> Dict[str, Any]:
         """Return a serializable snapshot of graph state valid at the given time."""

@@ -29,6 +29,7 @@ import type { OntologyEvidenceContext, OntologyGraphEdge, OntologyGraphNode } fr
 import { OntologyRuleEvidencePanel } from "./OntologyRuleEvidencePanel";
 import { OntologyTermDetails } from "./OntologyTermDetails";
 import { ClassPropertiesPanel } from "./ClassPropertiesPanel";
+import { ClassInstancesPanel } from "./ClassInstancesPanel";
 import {
   canEditOwnedOntologyTerm,
   classifyNodeType,
@@ -219,7 +220,7 @@ function buildEditorElements(apiNodes: OntologyGraphNode[], apiEdges: OntologyGr
   return { nodes, edges };
 }
 
-export function OntologyEditor({ evidenceContext }: { evidenceContext?: OntologyEvidenceContext }) {
+export function OntologyEditor({ evidenceContext, onJumpToGraphNode }: { evidenceContext?: OntologyEvidenceContext; onJumpToGraphNode?: (nodeId: string) => void }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<OntologyNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<OntologyEdge>([]);
   const [selectedElement, setSelectedElement] = useState<OntologyNode | OntologyEdge | null>(null);
@@ -745,6 +746,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
                 <div style={{ color: "#8fa8c6", fontSize: 12, marginTop: 12 }}>{selectedElement.data.type}</div>
               </> : null}
             </>}
+            {!("source" in selectedElement) && selectedElement.data.entityType === "class" ? <ClassInstancesPanel key={`${selectedElement.id}:${graphRevision}`} classUri={selectedElement.id} onJumpToGraphNode={onJumpToGraphNode} /> : null}
             {!("source" in selectedElement) && selectedElement.data.entityType === "class" ? <ClassPropertiesPanel
               classUri={selectedElement.id}
               nodes={schema.nodes}
