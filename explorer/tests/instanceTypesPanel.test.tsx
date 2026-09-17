@@ -23,12 +23,31 @@ const baseProps = { nodeId: "rule-1", snapshot, loading: false, error: null, sho
 const response = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status });
 test.afterEach(cleanup);
 
+test("primary class links remain direct while identity and evidence details are collapsed and reset for a new node", () => {
+  const view = render(<InstanceTypesPanel {...baseProps} />);
+  assert.ok(view.getByRole("button", { name: "Open class Process rule" }));
+  const identity = view.getByText("Class details").closest("details");
+  const related = view.getByText("Related concepts (1)").closest("details");
+  assert.ok(identity);
+  assert.ok(related);
+  assert.equal(identity.open, false);
+  assert.equal(related.open, false);
+  identity.open = true;
+  related.open = true;
+  assert.ok(view.getByRole("button", { name: "Open class Purchase request" }));
+  view.rerender(<InstanceTypesPanel {...baseProps} nodeId="rule-2" snapshot={{ ...snapshot, node_id: "rule-2" }} />);
+  assert.equal(view.getByText("Class details").closest("details")?.open, false);
+  assert.equal(view.getByText("Related concepts (1)").closest("details")?.open, false);
+});
+
 test("declared classes and evidence-related business concepts remain distinct and navigate exact URIs", () => {
   const opened: string[] = [];
   const toggles: boolean[] = [];
   const view = render(<InstanceTypesPanel {...baseProps} onOpenOntologyEntity={(uri) => opened.push(uri)} onShowTypes={(checked) => toggles.push(checked)} />);
   const declared = view.getByRole("region", { name: "Declared class" });
   const related = view.getByRole("region", { name: "Related business concepts via evidence" });
+  const disclosure = related.querySelector("details");
+  if (disclosure) disclosure.open = true;
   assert.ok(within(declared).getByText("Process rule"));
   assert.equal(within(declared).queryByText("Purchase request"), null);
   assert.ok(within(related).getByText("Purchase request"));

@@ -83,12 +83,40 @@ test("visible legend follows loaded data, reloads, focused views, and distance m
   const legend = page.getByRole("group", { name: "Node colors" });
   await legend.waitFor();
   await page.locator("canvas").first().waitFor({ state: "visible" });
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector("canvas.sigma-mouse")?.getBoundingClientRect();
+      const stage = document.querySelector(".explore-scene-stage")?.getBoundingClientRect();
+      return canvas && stage && Math.abs(canvas.width - stage.width) < 1 && Math.abs(canvas.height - stage.height) < 1;
+    });
+    const toolbar = await page.locator(".explore-command-deck").boundingBox();
+    const canvas = await page.locator("canvas.sigma-mouse").boundingBox();
+    assert.ok(toolbar && toolbar.height <= 160, "Primary controls must leave room for the graph on laptop screens");
+    assert.ok(canvas && canvas.height >= viewport.height * .55);
+    await page.getByText("Graph tools", { exact: true }).click();
+    assert.equal((await page.locator("canvas.sigma-mouse").boundingBox())?.height, canvas.height, "Tools open over the graph without shrinking it");
+    await page.getByRole("checkbox", { name: "Include ontology schema" }).focus();
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator(".explore-tools-menu").getAttribute("open"), null);
+  }
+  await page.setViewportSize({ width: 800, height: 800 });
+  await page.getByText("Graph tools", { exact: true }).click();
+  const popup = await page.locator(".explore-tools-popover").boundingBox();
+  const workspace = await page.locator(".explore-shell").boundingBox();
+  assert.ok(popup && workspace && popup.x >= workspace.x && popup.x + popup.width <= workspace.x + workspace.width, "Narrow-screen tools stay inside the workspace, clear of the sidebar");
+  await page.getByRole("checkbox", { name: "Include ontology schema" }).check();
+  await page.getByRole("checkbox", { name: "Include ontology schema" }).uncheck();
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1280, height: 800 });
   await assertLegendMatchesGraph(page);
   assert.equal(await legend.getByText("Person", { exact: true }).count(), 1);
   assert.equal(await legend.getByText("Biomolecule", { exact: true }).count(), 0);
 
   nodes = initialNodes.map((node) => ({ ...node, type: node.type === "Person" ? "Researcher" : node.type }));
+  await page.getByText("Graph tools", { exact: true }).click();
   await page.getByRole("button", { name: "Reload graph data" }).click();
+  assert.equal(await page.locator(".explore-tools-menu > summary").evaluate((element) => document.activeElement === element), true, "A tool action returns focus to the visible disclosure");
   await legend.getByText("Researcher", { exact: true }).waitFor();
   assert.equal(await legend.getByText("Person", { exact: true }).count(), 0);
   await assertLegendMatchesGraph(page);
@@ -96,8 +124,10 @@ test("visible legend follows loaded data, reloads, focused views, and distance m
   await page.getByPlaceholder("Search command, node, or concept").fill("Alice");
   await page.getByRole("option").filter({ hasText: "Alice" }).click();
   const heatmap = page.getByRole("button", { name: "Heatmap", exact: true });
+  await page.getByText("Graph tools", { exact: true }).click();
   await heatmap.click();
   await legend.waitFor({ state: "hidden" });
+  await page.getByText("Graph tools", { exact: true }).click();
   await heatmap.click();
   await legend.waitFor();
   await assertLegendMatchesGraph(page);

@@ -393,7 +393,7 @@ export function GraphInspectorPanel({
     : "";
 
   return (
-    <aside style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
+    <aside style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Node identity */}
       <div style={{ borderBottom: `1px solid ${GRAPH_THEME.ui.surface.divider}`, paddingBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -405,9 +405,10 @@ export function GraphInspectorPanel({
         <h3 style={{ margin: 0, color: GRAPH_THEME.ui.text.strong, fontSize: 20, fontWeight: 700, wordBreak: "break-word" }}>
           {String(attributes?.label ?? effectiveNodeId)}
         </h3>
-        <div style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 12, marginTop: 6, fontFamily: "monospace", wordBreak: "break-all" }}>
-          {groupedDisplaySelection ? nodeId : effectiveNodeId}
-        </div>
+        <details key={effectiveNodeId} style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 12, marginTop: 8 }}>
+          <summary style={{ cursor: "pointer" }}>Node identifier</summary>
+          <code style={{ display: "block", marginTop: 6, overflowWrap: "anywhere" }}>{groupedDisplaySelection ? nodeId : effectiveNodeId}</code>
+        </details>
         {groupedDisplaySelection ? (
           <div style={groupedSelectionNoticeStyle}>
             <div style={{ color: GRAPH_THEME.ui.text.strong, fontWeight: 600, marginBottom: 6 }}>This grouped item stays display-level until you explicitly enter Focused mode.</div>

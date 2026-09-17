@@ -252,26 +252,31 @@ files or source URLs. These operations preserve the saved candidate graph and
 evidence review states. Repeat the imports and context registration after
 restarting a session. Reopen Ontology Hub after registering the context.
 
-With a registered business context, **Ontology Hub → Business graph** is the
-default view. **Active ontology** lists business ontologies. The graph starts in
-read-only mode; **Technical vocabulary & advanced editing** contains the support
-vocabulary and an explicit **Enable advanced editing** option. **Advanced
-ontology tools** contains Registry and the other existing tools. The support
+With a registered business context, **Ontology Hub → Graph** is the
+default view, initially showing the business ontology. A single **Active ontology**
+selector lists every loaded ontology and shows the currently displayed resource,
+including a technical vocabulary opened from an instance. **Ontology view** switches
+between Graph, Registry, Versions, Alignments, Health and SHACL in the same compact
+toolbar. The graph starts in read-only mode; **Tools → Enable advanced editing**
+opens the separate structural draft workflow without expanding the toolbar. The support
 vocabulary is named **流程与证据支持词汇** in Chinese and **Process evidence
 vocabulary** in English. Sessions without this context keep the Registry default;
 explicit tab links and technical-term links remain usable.
 
 In **Knowledge Explorer**, schema definitions are hidden by default so the
-business instances, rules and evidence remain the main graph. **Include ontology
-schema** restores the loaded definitions and structural endpoints. The counters
+business instances, rules and evidence remain the main graph. **Graph tools → Include ontology
+schema** restores the loaded definitions and structural endpoints. Search, view mode,
+camera controls and layout remain directly accessible; secondary graph tools open
+over the canvas without reducing its height. The counters
 separate the visible graph from the complete session. Searching for a schema
 term enables that scope explicitly; turning it off clears hidden selections.
 This display projection does not delete triples, map instance types or merge
 ontologies. Legacy resources without explicit schema types are kept visible.
 
 Select an instance, rule or evidence node to see **Declared class** in its
-inspector. Each entry shows its exact class IRI, label and declaration basis.
-**Open class** navigates within the app to Ontology Hub, selecting and centering
+inspector. Click a class name to open its definition; **Class details** expands its
+exact IRI and declaration basis. **Node identifier** expands the complete node ID.
+The class link navigates within the app to Ontology Hub, selecting and centering
 the class on the canvas as well as opening its definition. **Back to Explorer**,
 browser Back, or the Knowledge Explorer sidebar entry restores the existing
 Explorer canvas, camera, selected node, view mode, filters, search and unapplied
@@ -291,7 +296,8 @@ reference opens its definition. These links do not add edges to storage or RDF;
 visible counts identify them as view-only links. Changing the selected node or
 graph revision clears the previous projection and class response.
 
-**Related business concepts via evidence** is separate from class membership.
+**Related concepts (count)** expands business concepts linked through evidence,
+separately from class membership.
 It reuses registered, validated source citations for ProcessRule and Evidence
 nodes. A rule about procurement remains a `ProcessRule`; a shared citation to
 `PurchaseRequest` does not make it an observed purchase request or an approved

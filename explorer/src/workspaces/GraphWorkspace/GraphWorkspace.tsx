@@ -177,7 +177,7 @@ const loadExplorationEffectsPlugin = () => import("./plugins/explorationEffectsP
 const loadNeighborhoodPanelPlugin = () => import("./plugins/neighborhoodPanelPlugin").then((module) => module.neighborhoodPanelPlugin);
 const loadTemporalOverlayPlugin = () => import("./plugins/temporalOverlayPlugin").then((module) => module.temporalOverlayPlugin);
 const EMPTY_PATH: string[] = [];
-const COMPACT_TOOLBAR_CLUSTER_IDS = new Set(["camera", "utility"]);
+const COMPACT_TOOLBAR_CLUSTER_IDS = new Set(["utility"]);
 
 const DEBUG_GRAPH_WORKSPACE = import.meta.env.DEV;
 
@@ -273,7 +273,7 @@ function ToolbarCluster({
 
   return (
     <div className="explore-tool-cluster" aria-label={label}>
-      <div className="explore-tool-cluster-label">{label}</div>
+      {!compact ? <div className="explore-tool-cluster-label">{label}</div> : null}
       <div className="explore-tool-cluster-items">
         {children}
         {items?.map((item) => (
@@ -638,7 +638,7 @@ const HUD_CSS = `
   }
   .explore-command-deck {
     position: relative;
-    z-index: 3;
+    z-index: 4;
   }
   .explore-command-grid {
     display: grid;
@@ -715,23 +715,26 @@ const HUD_CSS = `
   .explore-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
   .explore-status-strip {
     display: flex;
     align-items: center;
     gap: 7px;
     flex-wrap: wrap;
+    color: ${GRAPH_THEME.ui.text.muted};
+    font-size: 12px;
+    gap: 6px 14px;
   }
   .explore-workflow-bar {
-    display: grid;
-    grid-template-columns: minmax(280px, 1.1fr) auto minmax(360px, 1.55fr);
+    display: flex;
     align-items: center;
     gap: 10px;
   }
   .explore-search-command {
     position: relative;
-    min-width: 0;
+    flex: 1;
+    min-width: 180px;
     height: 43px;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -842,7 +845,44 @@ const HUD_CSS = `
     justify-content: flex-end;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .explore-toolbelt .explore-tool-cluster {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    min-height: 0;
+  }
+  .explore-tools-menu {
+    position: relative;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  .explore-tools-menu > summary {
+    cursor: pointer;
+    padding: 10px;
+    border: 1px solid ${GRAPH_THEME.ui.control.defaultBorder};
+    border-radius: 10px;
+    color: ${GRAPH_THEME.ui.text.body};
+    font-size: 12px;
+  }
+  .explore-tools-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: min(400px, 75vw);
+    max-height: min(480px, 65vh);
+    overflow-y: auto;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid ${GRAPH_THEME.ui.surface.panelBorder};
+    background: ${GRAPH_THEME.ui.surface.stage};
+    box-shadow: ${GRAPH_THEME.ui.surface.shadow};
   }
   .explore-tool-cluster {
     display: inline-flex;
@@ -984,13 +1024,6 @@ const HUD_CSS = `
     .explore-main-grid {
       grid-template-columns: 1fr;
     }
-    .explore-workflow-bar {
-      grid-template-columns: minmax(280px, 1fr) auto;
-    }
-    .explore-toolbelt {
-      grid-column: 1 / -1;
-      justify-content: flex-start;
-    }
   }
   @media (max-width: 980px) {
     .explore-shell {
@@ -1001,11 +1034,7 @@ const HUD_CSS = `
       grid-template-columns: 1fr;
     }
     .explore-workflow-bar {
-      grid-template-columns: 1fr;
-    }
-    .explore-mode-control {
-      width: 100%;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      flex-wrap: wrap;
     }
     .explore-toolbelt {
       justify-content: flex-start;
@@ -3093,16 +3122,6 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
 
   const toolbarClusters = useMemo<GraphToolbarGroup[]>(() => [
     {
-      id: "camera",
-      label: "Camera",
-      items: cameraToolbarItems,
-    },
-    {
-      id: "layout",
-      label: "Layout",
-      items: layoutToolbarItems,
-    },
-    {
       id: "local-structure",
       label: "Local",
       items: localToolbarItems,
@@ -3124,9 +3143,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
     },
   ].filter((group) => group.items.length > 0), [
     analysisToolbarItems,
-    cameraToolbarItems,
     distanceToolbarItems,
-    layoutToolbarItems,
     localToolbarItems,
     utilityToolbarItems,
   ]);
@@ -3242,24 +3259,37 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                     }}
                   />
                   <SegmentedModeControl items={viewModeItems} />
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAPH_THEME.ui.text.body }}>
-                    <input
-                      type="checkbox"
-                      checked={includeOntologySchema}
-                      onChange={(event) => handleSchemaScopeChange(event.target.checked)}
-                    />
-                    Include ontology schema
-                  </label>
                   <div className="explore-toolbelt">
-                    {toolbarClusters.map((group) => (
-                      <ToolbarCluster
-                        key={group.id}
-                        label={group.label ?? group.id}
-                        items={group.items}
-                        compact={COMPACT_TOOLBAR_CLUSTER_IDS.has(group.id)}
-                      />
-                    ))}
+                    <ToolbarCluster label="Camera" items={cameraToolbarItems} compact />
+                    {layoutToolbarItems.map((item) => <ToolbarButton key={item.id} item={item} />)}
                   </div>
+                  <details className="explore-tools-menu" onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.currentTarget.open = false;
+                      event.currentTarget.querySelector("summary")?.focus();
+                    }
+                  }} onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+                  }}>
+                    <summary>Graph tools</summary>
+                    <div className="explore-tools-popover" onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button")) {
+                        const menu = event.currentTarget.closest("details");
+                        if (menu) {
+                          menu.open = false;
+                          menu.querySelector("summary")?.focus();
+                        }
+                      }
+                    }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAPH_THEME.ui.text.body }}>
+                        <input type="checkbox" checked={includeOntologySchema} onChange={(event) => handleSchemaScopeChange(event.target.checked)} />
+                        Include ontology schema
+                      </label>
+                      {toolbarClusters.map((group) => (
+                        <ToolbarCluster key={group.id} label={group.label ?? group.id} items={group.items} compact={COMPACT_TOOLBAR_CLUSTER_IDS.has(group.id)} />
+                      ))}
+                    </div>
+                  </details>
                 </div>
                 {!showDistanceStatus ? <SemanticColorLegend items={colorLegendItems} /> : null}
               </div>
