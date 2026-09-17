@@ -49,7 +49,7 @@ test("renders Preview mode with formatted Markdown elements and tabs", () => {
 
   // Tab buttons are present
   assert.equal(html.includes("Preview"), true);
-  assert.equal(html.includes("Source"), true);
+  assert.equal(html.includes("Markdown source"), true);
   assert.equal(html.includes("Copy"), true);
 
   // Formatted preview elements

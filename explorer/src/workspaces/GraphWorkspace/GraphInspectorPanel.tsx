@@ -5,6 +5,7 @@ import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import type { FocusedUnavailableReason, GraphSelectedNodeKind } from "./types";
 import { focusedUnavailableReasonText } from "./graphViewCopy";
 import { MarkdownContentViewer } from "./MarkdownContentViewer";
+import { SourceEvidencePanel } from "./SourceEvidencePanel";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 
 export type LinkPrediction = {
@@ -419,6 +420,8 @@ export function GraphInspectorPanel({
           {attributes?.valid_until ? <div>until: {attributes.valid_until}</div> : null}
         </div>
       ) : null}
+
+      <SourceEvidencePanel kind="node" id={effectiveNodeId} />
 
       {/* Canonical nodes remain editable even when their current body is empty. */}
       <details className="node-panel-collapse" open>

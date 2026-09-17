@@ -46,6 +46,7 @@ import { createTemporalSnapshotGuards, type TemporalSnapshotResponse } from "./t
 import { SMALL_GRAPH_MAX_NODES } from "./smallGraphLayout";
 import { buildRealtimeEdgeAttributes } from "./realtimeGraphAttributes";
 import type { LinkPrediction, PathResponse } from "./GraphInspectorPanel";
+import { RelationshipSourceEvidence } from "./SourceEvidencePanel";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 import {
   NodeMarkdownRefreshGuard,
@@ -3291,6 +3292,8 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                       <MetricChip>{selectedEdgeState.provenanceCount} provenance fields</MetricChip>
                     ) : null}
                   </div>
+
+                  <RelationshipSourceEvidence edgeIds={selectedEdgeState.rawEdgeIds} />
 
                   {Object.keys(selectedEdgeState.properties).length ? (
                     <div style={selectedEdgePropertyGridStyle}>

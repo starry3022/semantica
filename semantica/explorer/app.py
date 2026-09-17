@@ -20,6 +20,7 @@ from .dependencies import anonymous_access_allowed, get_expected_api_key, requir
 from .markdown_resources import MarkdownResourceRegistry
 from .runtime import explorer_capabilities, install_mutation_bridge
 from .session import GraphSession
+from .source_resources import SourceResourceRegistry
 from .ws import ConnectionManager, install_graph_updates_websocket
 
 
@@ -60,6 +61,7 @@ def create_app(
     session: Optional[GraphSession] = None,
     provenance_storage_path: Optional[str] = None,
     agent_memory: Optional[AgentMemory] = None,
+    source_resources: Optional[SourceResourceRegistry] = None,
 ) -> FastAPI:
     """Create an Explorer application over live graph and memory objects.
 
@@ -69,6 +71,8 @@ def create_app(
         provenance_storage_path: Optional per-app provenance database path.
         agent_memory: Existing AgentMemory instance to expose in the Memories
             workspace. The workspace is unavailable when omitted.
+        source_resources: Explicitly registered original material snapshots.
+            An empty registry is used when omitted; graph browsing stays available.
 
     Returns:
         Configured FastAPI application.
@@ -85,6 +89,7 @@ def create_app(
         if prov_path is not None:
             active_session.set_provenance_storage_path(prov_path)
     markdown_resources = MarkdownResourceRegistry(active_session.graph, agent_memory)
+    active_source_resources = source_resources or SourceResourceRegistry()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -109,6 +114,7 @@ def create_app(
         app.state.session = active_session
         app.state.agent_memory = agent_memory
         app.state.markdown_resources = markdown_resources
+        app.state.source_resources = active_source_resources
         install_mutation_bridge(app, active_session)
         yield
 
@@ -166,6 +172,7 @@ def create_app(
     from .routes.memories import router as memories_router
     from .routes.ontology import router as ontology_router
     from .routes.provenance import router as provenance_router
+    from .routes.sources import router as sources_router
     from .routes.sparql import router as sparql_router
     from .routes.temporal import router as temporal_router
     from .routes.vocabulary import router as vocabulary_router
@@ -178,6 +185,7 @@ def create_app(
     app.include_router(enrich_router, dependencies=_auth)
     app.include_router(export_import_router, dependencies=_auth)
     app.include_router(markdown_router, dependencies=_auth)
+    app.include_router(sources_router, dependencies=_auth)
     app.include_router(memories_router, dependencies=_auth)
     app.include_router(annotations_router, dependencies=_auth)
     app.include_router(sparql_router, dependencies=_auth)

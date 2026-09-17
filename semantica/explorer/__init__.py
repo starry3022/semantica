@@ -33,6 +33,10 @@ def main(argv=None):
         help="Path to a ContextGraph JSON file to load.",
     )
     parser.add_argument(
+        "--source-manifest",
+        help="Optional JSON manifest registering original material by source identity.",
+    )
+    parser.add_argument(
         "--port", "-p",
         type=int,
         default=8000,
@@ -77,7 +81,20 @@ def main(argv=None):
         f"[cyan]{stats.get('edge_count', 0)}[/cyan] edges"
     )
 
-    app = create_app(session=session)
+    source_resources = None
+    if args.source_manifest:
+        from pathlib import Path
+
+        from .source_resources import SourceResourceRegistry
+
+        try:
+            source_resources = SourceResourceRegistry.from_manifest(
+                Path(args.source_manifest)
+            )
+        except (OSError, ValueError) as error:
+            _err.print(f"[bold red]Error:[/bold red] invalid source manifest: {error}")
+            sys.exit(1)
+    app = create_app(session=session, source_resources=source_resources)
 
     url = f"http://{args.host}:{args.port}"
 

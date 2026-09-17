@@ -171,6 +171,65 @@ does not trust offsets or a coverage verdict merely because they occur in JSON.
 The CLI suppresses provider logs and redacts the explicitly configured API key
 from reported exceptions; it never exports the private config.
 
+## Inspecting source materials in Explorer
+
+Register the original UTF-8 text explicitly when starting Explorer. Place a
+`sources.json` manifest next to `source.txt`:
+
+```json
+{
+  "sources": [
+    {
+      "source_id": "maintenance-policy-v3",
+      "path": "source.txt",
+      "title": "Maintenance policy"
+    }
+  ]
+}
+```
+
+The `source_id` must match the graph. Optional `version` and `source_uri` fields
+describe known metadata; omitted versions are displayed as unknown. Do not invent
+a version or effective date. Multiple entries can register different sources or
+different content hashes for one source ID.
+
+```bash
+SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
+  --graph /path/to/artifacts/candidate-graph.json \
+  --source-manifest /path/to/artifacts/sources.json \
+  --host 127.0.0.1 --port 8007 --no-browser
+```
+
+Manifest paths must be relative files inside the manifest directory. Absolute
+paths, directory escapes and symlinks escaping that directory are rejected.
+HTTP requests select graph node or edge IDs; they cannot register files or request
+arbitrary filesystem paths. Source URIs are metadata and are never fetched.
+Registered text is a startup snapshot: restart with the appropriate manifest to
+load changed materials. Graph imports do not automatically register source files.
+
+Select a ProcessRule, Evidence or SourceDocument and open **Source material**.
+The full-text viewer shows the material identity, version, SHA-256 and evidence
+status. Select a primary or supporting clause to scroll to and highlight its exact
+span. **Markdown source** in the existing Content viewer means the node's Markdown,
+not the original material.
+
+Only explicit evidence associations are used: `hasEvidence` targets,
+`fromSource` evidence sources, or a relationship's `evidence_id` / `evidence_ids`
+properties. Unrelated neighbors do not count as evidence. Old graphs remain
+browsable and show an explicit empty state when these associations are absent.
+
+The viewer checks the registered content hash, Unicode character offsets
+`[start_char, end_char)`, and the exact quotation. Chinese characters, emoji and
+newlines retain their positions; repeated quotations use the supplied offsets
+instead of searching for the first occurrence. Missing materials, mismatched
+hashes and invalid spans are reported without a successful highlight. Source text
+is displayed literally, including any HTML or Markdown it contains.
+
+**Quote alignment is not business approval.** These checks do not establish policy
+authority, semantic completeness or business correctness, and do not change
+`candidate / unreviewed` states. Source registration and viewing do not modify
+saved extraction results, graph data or RDF exports.
+
 ## Compatibility and tests
 
 The existing generic entity/relation conversion now preserves model-provided
