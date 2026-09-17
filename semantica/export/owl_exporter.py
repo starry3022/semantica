@@ -233,7 +233,7 @@ class OWLExporter:
         esc_xml = self._escape_xml
         ontology_uri = ontology.get("uri") or self.ontology_uri
         ontology_name = ontology.get("name", "SemanticaOntology")
-        version = ontology.get("version") or self.version
+        version = ontology.get("version", self.version)
 
         lines = ['<?xml version="1.0"?>']
         lines.append('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"')
@@ -245,7 +245,8 @@ class OWLExporter:
         # Ontology declaration
         lines.append(f'  <owl:Ontology rdf:about="{esc_xml(ontology_uri)}">')
         lines.append(f"    <rdfs:label>{esc_xml(ontology_name)}</rdfs:label>")
-        lines.append(f"    <owl:versionInfo>{esc_xml(version)}</owl:versionInfo>")
+        if version:
+            lines.append(f"    <owl:versionInfo>{esc_xml(version)}</owl:versionInfo>")
         if ontology.get("description"):
             lines.append(
                 f'    <rdfs:comment>{esc_xml(ontology.get("description"))}</rdfs:comment>'
@@ -272,7 +273,7 @@ class OWLExporter:
                     "as an empty rdf:about"
                 )
                 continue
-            class_name = cls.get("name") or cls.get("label", "")
+            class_name = cls.get("label") or cls.get("name", "")
 
             lines.append(f'  <owl:Class rdf:about="{esc_xml(class_uri)}">')
             lines.append(f"    <rdfs:label>{esc_xml(class_name)}</rdfs:label>")
@@ -308,7 +309,7 @@ class OWLExporter:
                     "Skipping an object property with no name, uri or id"
                 )
                 continue
-            prop_name = prop.get("name") or prop.get("label", "")
+            prop_name = prop.get("label") or prop.get("name", "")
 
             lines.append(f'  <owl:ObjectProperty rdf:about="{esc_xml(prop_uri)}">')
             lines.append(f"    <rdfs:label>{esc_xml(prop_name)}</rdfs:label>")
@@ -340,7 +341,7 @@ class OWLExporter:
             if not prop_uri:
                 self.logger.warning("Skipping a data property with no name, uri or id")
                 continue
-            prop_name = prop.get("name") or prop.get("label", "")
+            prop_name = prop.get("label") or prop.get("name", "")
 
             lines.append(f'  <owl:DatatypeProperty rdf:about="{esc_xml(prop_uri)}">')
             lines.append(f"    <rdfs:label>{esc_xml(prop_name)}</rdfs:label>")
@@ -615,7 +616,7 @@ class OWLExporter:
         esc = self._escape_ttl_str
         ontology_uri = ontology.get("uri") or self.ontology_uri
         ontology_name = ontology.get("name", "SemanticaOntology")
-        version = ontology.get("version") or self.version
+        version = ontology.get("version", self.version)
 
         lines = []
 
@@ -630,8 +631,9 @@ class OWLExporter:
         # Ontology declaration
         onto_predicates = [
             f'rdfs:label "{esc(ontology_name)}"',
-            f'owl:versionInfo "{esc(version)}"',
         ]
+        if version:
+            onto_predicates.append(f'owl:versionInfo "{esc(version)}"')
         description = ontology.get("description")
         if description:
             onto_predicates.append(f'rdfs:comment "{esc(description)}"')
@@ -656,7 +658,7 @@ class OWLExporter:
                     "Skipping a class with no name, uri or id: it would serialise as <>"
                 )
                 continue
-            class_name = cls.get("name") or cls.get("label", "")
+            class_name = cls.get("label") or cls.get("name", "")
             predicates = [f'rdfs:label "{esc(class_name)}"']
             comment = cls.get("comment") or cls.get("description")
             if comment:
@@ -680,7 +682,7 @@ class OWLExporter:
                     "Skipping an object property with no name, uri or id"
                 )
                 continue
-            prop_name = prop.get("name") or prop.get("label", "")
+            prop_name = prop.get("label") or prop.get("name", "")
             predicates = [f'rdfs:label "{esc(prop_name)}"']
             comment = prop.get("comment") or prop.get("description")
             if comment:
@@ -702,7 +704,7 @@ class OWLExporter:
             if not prop_uri:
                 self.logger.warning("Skipping a data property with no name, uri or id")
                 continue
-            prop_name = prop.get("name") or prop.get("label", "")
+            prop_name = prop.get("label") or prop.get("name", "")
             predicates = [f'rdfs:label "{esc(prop_name)}"']
             comment = prop.get("comment") or prop.get("description")
             if comment:

@@ -54,10 +54,12 @@ interpretation is correct.
 
 ## LLM stages and output budget
 
-Only `extract_process_rules` calls the LLM. Its single typed response contains
+`extract_process_rules` calls the LLM for process rules. Its typed response contains
 rules, roles, conditions, approval groups, document requirements, deadlines,
 evidence quotations and clause assessments. There are no separate NER or
-relation-extraction model calls in this path.
+relation-extraction model calls in this path. The separate business-ontology
+command below makes its own explicit LLM call; it reuses the original text and
+does not regenerate or rewrite the rules.
 
 | Stage | LLM call | Output token limit |
 |---|---|---|
@@ -65,7 +67,8 @@ relation-extraction model calls in this path.
 | Typed process-rule extraction and clause assessment | Yes | Caller-supplied `max_tokens`; the example above uses 16384 |
 | Schema validation, exact evidence alignment and coverage consistency | No | Not applicable |
 | Graph projection and instance RDF export | No | Not applicable |
-| Declared ontology generation and OWL serialization | No | Not applicable |
+| Business ontology proposal with `LLMOntologyGenerator` | Yes, when explicitly requested | Caller-supplied `max_tokens` |
+| Fixed process/evidence vocabulary and RDF/OWL serialization | No | Not applicable |
 | SHACL generation and validation | No | Not applicable |
 | Offline replay and Explorer display | No | Not applicable |
 
@@ -200,11 +203,12 @@ SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
   --host 127.0.0.1 --port 8007 --no-browser
 ```
 
-The candidate graph contains rule instances. Load the separate, explicitly
-generated `ontology.ttl` into each new Explorer session to browse the schema.
-In **Ontology Hub → Load Ontology → File Upload**, select that file and load it.
-The registry then lists **Process Rule Ontology**; **Editor** displays its classes
-and properties. A graph-only startup has an empty ontology registry.
+The candidate graph contains rule instances. Each new Explorer session needs an
+explicit schema import. In **Ontology Hub → Load Ontology → File Upload**, load
+the business `ontology.ttl` and the separate `process-vocabulary.ttl` produced by
+the command below. Select the desired ontology in **Editor → Active ontology**.
+The support vocabulary is named **流程与证据支持词汇** in Chinese and **Process
+evidence vocabulary** in English. A graph-only startup has an empty registry.
 
 For a repeatable local startup, run the following in another terminal after
 Explorer is healthy. Send the existing file's text to the ontology import API;
@@ -234,7 +238,7 @@ PY
 This import adds schema nodes and edges to the running session. It preserves the
 saved candidate graph, source registration and evidence review states. Repeat
 the import after restarting a session from the candidate graph. For the supplied
-procurement artifacts, the ontology has 9 classes and 40 properties; importing it
+procurement artifacts, the fixed support vocabulary has 9 classes and 40 properties; importing it
 adds 56 nodes and 72 edges to the 54-node, 96-edge candidate graph.
 
 Select a relationship in Knowledge Explorer and expand **Properties · N — View
@@ -246,6 +250,80 @@ space. Selecting another relationship clears the previous values and closes
 the list. A relationship without properties shows an explicit empty state.
 These raw fields do not imply verified evidence or business approval; use the
 separate **Source material & evidence** entry for validated source alignment.
+
+## LLM business ontology and technical RDF fields
+
+Generate a separate candidate business ontology with the configured model:
+
+```bash
+python examples/ontology_from_text.py \
+  --source /path/to/artifacts/source.txt \
+  --config /private/llm-config.json \
+  --max-tokens 16384 \
+  --base-uri https://example.org/procurement-business/ \
+  --process-base-uri https://example.org/procurement-process/ \
+  --name '采购与付款业务候选本体' \
+  --output /path/to/new-business-ontology
+```
+
+The private JSON specifies `provider`, `model` and optional `api_key`, `base_url`
+and generation options. `--max-tokens` overrides only this request. The example
+does not implement the local audit runner's separate `timeout_seconds` setting.
+The output must be a new or empty directory. No dependencies, URL fetching,
+global model configuration changes or implicit static fallback are involved.
+
+The output contains `ontology.json`, `ontology.ttl`, `ontology.owl`, the separate
+Chinese `process-vocabulary.ttl`, exact `source.txt`, `prompt.txt`,
+`validation.json` and `SUMMARY.json`. For offline validation/export, replace
+`--config ... --max-tokens ...` with `--replay /saved/ontology.json`; retain the
+saved `prompt.txt` beside it. Replay checks source and prompt hashes and makes no
+model call. Successful artifacts are published only after all checks pass.
+
+The prompt requires source-language business labels and definitions, PascalCase
+class identifiers, camelCase property identifiers and evidence selected by
+inclusive, 1-based `evidence_lines`. Code copies the quote from the selected
+source lines with Unicode and line endings unchanged; the model does not invent
+character offsets. Replay also accepts earlier exact-quote candidates.
+For an explicit revision, the Python API accepts `draft_ontology` and
+`review_feedback` in `generate_ontology_from_text`. The draft remains untrusted;
+the model must check it against the original source. Feedback and draft are
+included in the saved prompt/hash, and the result passes the same validation.
+This is another model call, not a silent repair or an approval action.
+It distinguishes classes from individuals, people from role types, authorization
+requests from grants, and required approval from completed approval. A class's
+name, label and definition must describe the same concept. Source instructions
+are document data. Fixed evidence terms cannot be redefined by the model.
+
+The boundary rejects malformed/empty results, duplicate names/IRIs, undeclared
+references, hierarchy cycles, unsupported datatypes, invalid/blank line selections
+and nonmatching quotes.
+Grounded mode requires one declared domain/range per property, avoiding an
+accidental intersection when the model intended alternatives. References become
+full HTTP(S) IRIs, and parent relationships survive both OWL serializers. The
+bundle verifies Turtle/RDF/XML graph equivalence. Quotes and provenance remain
+visible as RDF comments. These checks establish structure and exact quotation,
+not completeness, entailment, business review or authorization.
+
+| RDF element | Who chooses or computes it? |
+|---|---|
+| Business ontology class/property names and definitions | LLM proposal, subject to validation and review |
+| Process rules, conditions and quoted evidence | LLM extraction, followed by deterministic validation |
+| `ProcessRule`, `Evidence`, `hasEvidence`, `start_char`, `end_char` | Fixed representation/evidence vocabulary in code |
+| Evidence offsets and source hashes | Code, never guessed by the model |
+| Turtle/OWL syntax, literal datatypes and instance identifiers | Deterministic serializers and graph projection |
+
+`start_char` is an evidence property, not a business class. It means a zero-based
+Unicode codepoint offset; `end_char` is exclusive. The support vocabulary adds
+readable labels such as **证据起始位置** and **证据结束位置** and explains the
+`[start_char, end_char)` interval. Its original IRIs, types, domains/ranges,
+instance values and SHACL targets remain stable. [RDFS labels](https://www.w3.org/TR/rdf-schema/#ch_label)
+provide human-readable names without changing resource identity.
+
+The business schema uses a distinct namespace and does not automatically retype
+existing rule records as business events or assert equivalence between the two
+vocabularies. Review and an explicit mapping are required before using it to
+govern instance data. All proposals remain `candidate / unreviewed`. A missing
+ontology version stays unknown; a document's V1.3 is not an ontology release.
 
 Manifest paths must be relative files inside the manifest directory. Absolute
 paths, directory escapes and symlinks escaping that directory are rejected.

@@ -684,9 +684,9 @@ def _convert_ontology_to_graph(ontology_dict: Dict[str, Any]) -> Tuple[List[Dict
         node = {
             "id": cls_uri,
             "type": "owl:Class",
-            "content": cls.get("name", cls.get("label", "")),
+            "content": cls.get("label") or cls.get("name", ""),
             "properties": {
-                "rdfs:label": cls.get("label", cls.get("name", "")),
+                "rdfs:label": cls.get("label") or cls.get("name", ""),
                 "rdfs:comment": cls.get("description", ""),
                 "uri": cls_uri,
                 "scheme_uri": ontology_uri,
@@ -715,9 +715,9 @@ def _convert_ontology_to_graph(ontology_dict: Dict[str, Any]) -> Tuple[List[Dict
         node = {
             "id": prop_uri,
             "type": property_type,
-            "content": prop.get("name", prop.get("label", "")),
+            "content": prop.get("label") or prop.get("name", ""),
             "properties": {
-                "rdfs:label": prop.get("label", prop.get("name", "")),
+                "rdfs:label": prop.get("label") or prop.get("name", ""),
                 "rdfs:comment": prop.get("description", ""),
                 "uri": prop_uri,
                 "scheme_uri": ontology_uri,

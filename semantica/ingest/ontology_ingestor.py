@@ -275,7 +275,7 @@ class OntologyIngestor:
         ontology = {
             "uri": "",
             "name": os.path.basename(source_path),
-            "version": "1.0",
+            "version": None,
             "classes": [],
             "properties": [],
             "metadata": {

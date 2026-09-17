@@ -53,6 +53,8 @@ class OntologyEngine:
     def from_text(self, text: str, provider: Optional[str] = None, model: Optional[str] = None, **options) -> Dict[str, Any]:
         if provider:
             self.llm.set_provider(provider, model=model)
+        elif model is not None:
+            options["model"] = model
         return self.llm.generate_ontology_from_text(text, **options)
 
     def infer_classes(self, entities: List[Dict[str, Any]], **options) -> List[Dict[str, Any]]:
