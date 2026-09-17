@@ -200,7 +200,7 @@ different content hashes for one source ID.
 SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
   --graph /path/to/artifacts/candidate-graph.json \
   --source-manifest /path/to/artifacts/sources.json \
-  --host 127.0.0.1 --port 8010 --no-browser
+  --host 127.0.0.1 --port 8013 --no-browser
 ```
 
 The candidate graph contains rule instances. Each new Explorer session needs an
@@ -223,7 +223,7 @@ import urllib.request
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
-base_url = "http://127.0.0.1:8010"
+base_url = "http://127.0.0.1:8013"
 
 def post(path, payload):
     request = urllib.request.Request(
@@ -260,6 +260,35 @@ ontology tools** contains Registry and the other existing tools. The support
 vocabulary is named **流程与证据支持词汇** in Chinese and **Process evidence
 vocabulary** in English. Sessions without this context keep the Registry default;
 explicit tab links and technical-term links remain usable.
+
+In **Knowledge Explorer**, schema definitions are hidden by default so the
+business instances, rules and evidence remain the main graph. **Include ontology
+schema** restores the loaded definitions and structural endpoints. The counters
+separate the visible graph from the complete session. Searching for a schema
+term enables that scope explicitly; turning it off clears hidden selections.
+This display projection does not delete triples, map instance types or merge
+ontologies. Legacy resources without explicit schema types are kept visible.
+
+Selecting a class shows **Declared properties**, **Inherited properties** from
+loaded parent-class declarations, and a separate **Referenced as range** group.
+Rows show property type, domain and range; select a row to open its definition.
+These RDFS declarations do not make fields mandatory and are not instance values.
+
+**Edit class** changes label, definition and parent classes. **Edit property**
+changes label, definition, domain and range. **Save changes** writes the current
+graph session and reloads its definition; it does not publish a version, edit
+source files or approve candidate knowledge. References use one full IRI per
+line and must already be loaded; datatype ranges must also be recognized XSD
+IRIs. URI, term type, ownership and review metadata cannot be changed by this
+form. External or unsupported legacy terms keep their read-only details.
+
+The API is GET/PATCH `/api/ontology/term?ontology_uri=...&term_uri=...`. PATCH
+requires `expected_revision`, `label`, `comment`, `parents`, `domain` and `range`.
+A concurrent edit returns 409 without overwriting the other change. The form
+keeps its draft and offers **Reload current definition**; **Cancel editing**
+discards only the local draft. Session edits survive browser reload but not
+server restart. The older advanced **Save draft** workflow remains separate;
+it is not the session-save action.
 
 Select a business class or property, read its definition, and expand **Related
 rules & evidence**. Each association identifies **Direct term citation** or
@@ -437,6 +466,7 @@ python -m pytest -q \
   tests/explorer/test_ontology_rule_links.py
 cd explorer
 npm run test:ontology-evidence
+npm run test:ontology-terms
 npm run test:graph-workspace
 npm run build
 ```

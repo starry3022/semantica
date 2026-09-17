@@ -27,7 +27,10 @@ import {
 import { loadOntologyEntityOwner, loadOntologyGraph } from "./api";
 import type { OntologyEvidenceContext, OntologyGraphEdge, OntologyGraphNode } from "./api";
 import { OntologyRuleEvidencePanel } from "./OntologyRuleEvidencePanel";
+import { OntologyTermDetails } from "./OntologyTermDetails";
+import { ClassPropertiesPanel } from "./ClassPropertiesPanel";
 import {
+  canEditOwnedOntologyTerm,
   classifyNodeType,
   isEditableEntityType,
   ONTOLOGY_MINIMAP_THEME,
@@ -226,6 +229,9 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<OntologyNode, OntologyEdge> | null>(null);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState("");
+  const [schema, setSchema] = useState<{ nodes: OntologyGraphNode[]; edges: OntologyGraphEdge[] }>({ nodes: [], edges: [] });
+  const [graphRevision, setGraphRevision] = useState(0);
+  const [saveNotice, setSaveNotice] = useState("");
   const [unownedEntity, setUnownedEntity] = useState("");
   const [draftDiff, setDraftDiff] = useState<DraftDiff>({
     added_classes: [],
@@ -284,6 +290,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
 
   useEffect(() => {
     if (!ontologyUri) {
+      setSchema({ nodes: [], edges: [] });
       setNodes([]);
       setEdges([]);
       setSelectedElement(null);
@@ -291,6 +298,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
     }
 
     const controller = new AbortController();
+    setSchema({ nodes: [], edges: [] });
     setSelectedElement(null);
     setNodes([]);
     setEdges([]);
@@ -299,6 +307,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
     loadOntologyGraph(ontologyUri, controller.signal)
       .then((payload) => {
         if (controller.signal.aborted) return;
+        setSchema({ nodes: payload.nodes, edges: payload.edges });
         const elements = buildEditorElements(payload.nodes, payload.edges);
         setNodes(elements.nodes);
         setEdges(elements.edges);
@@ -317,7 +326,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
       });
 
     return () => controller.abort();
-  }, [ontologyUri, setEdges, setNodes]);
+  }, [ontologyUri, setEdges, setNodes, graphRevision]);
 
   useEffect(() => {
     if (!flowInstance || nodes.length === 0) return;
@@ -631,7 +640,7 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
         <div style={{ flex: 1 }} />
         {!readOnly ? <button style={toolbarButtonStyle} onClick={saveDraft} disabled={isSaving}>
           <Send size={14} />
-          {isSaving ? "Saving..." : "Propose"}
+          {isSaving ? "Saving..." : "Save draft"}
         </button> : null}
       </div>
 
@@ -716,76 +725,36 @@ export function OntologyEditor({ evidenceContext }: { evidenceContext?: Ontology
                       ? "External Term Details"
                       : "Class Details"}
             </h3>
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", color: "#8fa8c6", fontSize: "12px", marginBottom: "4px" }}>
-                ID
-              </label>
-              <div style={{ color: "#ebf3ff", fontSize: "13px", wordBreak: "break-all" }}>
-                {selectedElement.id}
-              </div>
-            </div>
-            {!("source" in selectedElement) && (
-              <>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", color: "#8fa8c6", fontSize: "12px", marginBottom: "4px" }}>
-                    Label
-                  </label>
-                  <input
-                    type="text"
-                    value={String(selectedElement.data.label ?? "")}
-                    readOnly={readOnly || !isEditableEntityType(selectedElement.data.entityType)}
-                    onChange={(e) => {
-                      if (readOnly || !isEditableEntityType(selectedElement.data.entityType)) return;
-                      setNodes((nds) =>
-                        nds.map((n) =>
-                          n.id === selectedElement.id
-                            ? { ...n, data: { ...n.data, label: e.target.value } }
-                            : n
-                        )
-                      );
-                      setDraftDiff((prev) => ({
-                        ...prev,
-                        ...(selectedElement.data.entityType === "property"
-                          ? {
-                              modified_properties: {
-                                ...prev.modified_properties,
-                                [selectedElement.id]: { label: e.target.value },
-                              },
-                            }
-                          : {
-                              modified_classes: {
-                                ...prev.modified_classes,
-                                [selectedElement.id]: { label: e.target.value },
-                              },
-                            }),
-                      }));
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "8px",
-                      borderRadius: "6px",
-                      border: "1px solid rgba(127, 208, 255, 0.2)",
-                      background: "rgba(3, 9, 18, 0.8)",
-                      color: "#ebf3ff",
-                      fontSize: "13px",
-                    }}
-                  />
-                </div>
-                {selectedElement.data.description ? <div style={{ marginBottom: 16 }}>
-                  <div style={{ color: "#8fa8c6", fontSize: 12, marginBottom: 6 }}>Definition & source notes</div>
-                  <div style={{ color: "#ebf3ff", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{selectedElement.data.description}</div>
-                </div> : null}
-                {businessOntology && isEditableEntityType(selectedElement.data.entityType) ? <OntologyRuleEvidencePanel ontologyUri={ontologyUri} termUri={selectedElement.id} /> : null}
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", color: "#8fa8c6", fontSize: "12px", marginBottom: "4px" }}>
-                    Type
-                  </label>
-                  <div style={{ color: "#ebf3ff", fontSize: "13px" }}>
-                    {selectedElement.data.type || "owl:Class"}
-                  </div>
-                </div>
-              </>
-            )}
+            {saveNotice ? <p role="status" style={{ color: "#97d8b6", fontSize: 12 }}>{saveNotice}</p> : null}
+            {!("source" in selectedElement) && canEditOwnedOntologyTerm(schema.nodes.find((node) => node.id === selectedElement.id), ontologyUri) ? <>
+              <OntologyTermDetails
+                ontologyUri={ontologyUri}
+                termUri={selectedElement.id}
+                onSaved={() => {
+                  setSaveNotice("Changes saved to the current session.");
+                  setGraphRevision((revision) => revision + 1);
+                }}
+              />
+            </> : <>
+              <div style={{ color: "#8fa8c6", fontSize: 12, marginBottom: 4 }}>ID</div>
+              <div style={{ color: "#ebf3ff", fontSize: 13, overflowWrap: "anywhere", marginBottom: 12 }}>{selectedElement.id}</div>
+              {!("source" in selectedElement) ? <>
+                <div style={{ color: "#ebf3ff", fontSize: 13, marginBottom: 12 }}>{selectedElement.data.label}</div>
+                <div style={{ color: "#8fa8c6", fontSize: 12, marginBottom: 6 }}>Definition & source notes</div>
+                <div style={{ color: "#ebf3ff", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{selectedElement.data.description || "Not declared"}</div>
+                <div style={{ color: "#8fa8c6", fontSize: 12, marginTop: 12 }}>{selectedElement.data.type}</div>
+              </> : null}
+            </>}
+            {!("source" in selectedElement) && selectedElement.data.entityType === "class" ? <ClassPropertiesPanel
+              classUri={selectedElement.id}
+              nodes={schema.nodes}
+              edges={schema.edges}
+              onSelectTerm={(termUri) => {
+                const term = nodes.find((node) => node.id === termUri);
+                if (term) selectNode(term);
+              }}
+            /> : null}
+            {!("source" in selectedElement) && businessOntology && isEditableEntityType(selectedElement.data.entityType) ? <OntologyRuleEvidencePanel key={graphRevision} ontologyUri={ontologyUri} termUri={selectedElement.id} /> : null}
           </div>
         )}
       </div>

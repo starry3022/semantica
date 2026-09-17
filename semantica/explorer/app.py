@@ -172,6 +172,7 @@ def create_app(
     from .routes.memories import router as memories_router
     from .routes.ontology import router as ontology_router
     from .routes.ontology_evidence import router as ontology_evidence_router
+    from .routes.ontology_terms import router as ontology_terms_router
     from .routes.provenance import router as provenance_router
     from .routes.sources import router as sources_router
     from .routes.sparql import router as sparql_router
@@ -193,6 +194,7 @@ def create_app(
     app.include_router(provenance_router, dependencies=_auth)
     app.include_router(vocabulary_router, dependencies=_auth)
     app.include_router(ontology_evidence_router, dependencies=_auth)
+    app.include_router(ontology_terms_router, dependencies=_auth)
     app.include_router(ontology_router, dependencies=_auth)
 
     install_graph_updates_websocket(app, settings["allowed_origins"])

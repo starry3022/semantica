@@ -29,6 +29,7 @@ import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
 import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import { buildGraphColorLegend, type GraphColorLegendItem } from "./graphColorLegend";
+import { createKnowledgeGraphScope } from "./graphSchemaScope";
 import { focusedUnavailableReasonText, groupedViewReasonText } from "./graphViewCopy";
 import { localGraphRequiresDraftConfirm } from "./localGraphTransition";
 import { buildHeatmapRenderSnapshot, buildStructuralDistanceSnapshot, checkGroupedViewAvailability, getDistanceBandColor, resolveDisplayGraph, resolveDisplayStateSnapshot, resolveGroupedDisplayNodeId, resolveGroupedDisplayStateSnapshot, summarizeDistanceBuckets } from "./graphSceneState";
@@ -1071,12 +1072,13 @@ function synchronizeRealtimeSmallGraphEdges(isSmallGraph: boolean): void {
 function buildSelectedNodeState(
   nodeId: string,
   displayState: GraphDisplayStateSnapshot,
+  sourceGraph: typeof graph = graph,
 ): GraphSelectedNodeState | null {
-  if (!nodeId || !graph.hasNode(nodeId)) {
+  if (!nodeId || !sourceGraph.hasNode(nodeId)) {
     return null;
   }
 
-  const attributes = graph.getNodeAttributes(nodeId) as {
+  const attributes = sourceGraph.getNodeAttributes(nodeId) as {
     label?: string;
     content?: string;
     nodeType?: string;
@@ -1095,11 +1097,11 @@ function buildSelectedNodeState(
     valid_from: attributes.valid_from ?? null,
     valid_until: attributes.valid_until ?? null,
     properties: attributes.properties ?? {},
-    neighborCount: graph.neighbors(nodeId).length,
+    neighborCount: sourceGraph.neighbors(nodeId).length,
     visibleNeighborCount: displayState.selectedVisibleNeighborIds.length,
     collapsedNeighborCount: displayState.selectedCollapsedNeighborIds.length,
     isNeighborhoodCollapsed: displayState.selectedCollapsedNeighborIds.length > 0,
-    canCollapseNeighborhood: graph.neighbors(nodeId).length > 8,
+    canCollapseNeighborhood: sourceGraph.neighbors(nodeId).length > 8,
   };
 }
 
@@ -1257,6 +1259,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [graphReady, setGraphReady] = useState(false);
   const [graphVersion, setGraphVersion] = useState(0);
+  const [includeOntologySchema, setIncludeOntologySchema] = useState(false);
   const [markdownDraftDirty, setMarkdownDraftDirty] = useState(false);
   const markdownRefreshGuard = useMemo(() => new NodeMarkdownRefreshGuard(), []);
   const handleMarkdownDirtyChange = useCallback((dirty: boolean) => {
@@ -1568,6 +1571,12 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     debouncedTime,
   ]);
 
+  const knowledgeScope = useMemo(() => {
+    void graphVersion;
+    return createKnowledgeGraphScope(graph, includeOntologySchema);
+  }, [graphVersion, includeOntologySchema]);
+  const scopedGraph = knowledgeScope.graph;
+
   const resolveNodeIdForFocusedMode = useCallback((
     nodeId: string,
     displayGraphCandidate?: GraphSceneRuntime["displayGraph"] | null,
@@ -1580,7 +1589,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       };
     }
 
-    if (graph.hasNode(nodeId)) {
+    if (scopedGraph.hasNode(nodeId)) {
       return {
         kind: "base",
         resolvedNodeId: nodeId,
@@ -1588,7 +1597,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       };
     }
 
-    const currentDisplayGraph = displayGraphCandidate ?? pluginRuntimeRef.current?.displayGraph ?? graph;
+    const currentDisplayGraph = displayGraphCandidate ?? pluginRuntimeRef.current?.displayGraph ?? scopedGraph;
     if (currentDisplayGraph.hasNode(nodeId)) {
       const displayAttrs = currentDisplayGraph.getNodeAttributes(nodeId) as NodeAttributes;
       const communityGroup = displayAttrs.properties?.__communityGroup as
@@ -1599,7 +1608,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
         | undefined;
 
       const anchorNodeId = communityGroup?.anchorNodeId || communityGroup?.sampleNodeIds?.[0] || "";
-      if (anchorNodeId && graph.hasNode(anchorNodeId)) {
+      if (anchorNodeId && scopedGraph.hasNode(anchorNodeId)) {
         return {
           kind: "grouped",
           resolvedNodeId: anchorNodeId,
@@ -1619,7 +1628,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       resolvedNodeId: null,
       reason: { code: "not-in-graph" },
     };
-  }, []);
+  }, [scopedGraph]);
 
   const focusedSelectionResolution = useMemo(
     () => resolveNodeIdForFocusedMode(selectedNodeId, pluginRuntimeRef.current?.displayGraph),
@@ -1628,17 +1637,18 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   const inspectableNodeId = focusedSelectionResolution.resolvedNodeId ?? "";
   const canActivateFocusedMode = Boolean(focusedSelectionResolution.resolvedNodeId);
   const { available: groupedViewAvailable, reason: groupedViewReason } = useMemo(
-    () => checkGroupedViewAvailability(),
-    [graphVersion],
+    () => checkGroupedViewAvailability(scopedGraph),
+    [scopedGraph, graphVersion],
   );
   const groupedDisplayCandidate = useMemo(
     () => viewMode === "grouped"
       ? resolveDisplayGraph("", EMPTY_PATH, EMPTY_PATH, "grouped", {
+          sourceGraph: scopedGraph,
           aggregationEnabled,
           collapsedNeighborhoodNodeIds,
         })
       : null,
-    [viewMode, aggregationEnabled, collapsedNeighborhoodNodeIds, graphVersion],
+    [viewMode, aggregationEnabled, collapsedNeighborhoodNodeIds, graphVersion, scopedGraph],
   );
   const confirmDiscardMarkdownDraft = useCallback(() => {
     if (!markdownDraftDirty) return true;
@@ -1647,6 +1657,47 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     );
     return discard;
   }, [markdownDraftDirty]);
+
+  const handleSchemaScopeChange = useCallback((includeSchema: boolean) => {
+    if (!confirmDiscardMarkdownDraft()) return;
+    setIncludeOntologySchema(includeSchema);
+    setSelectedEdgeId("");
+    setPathResult(null);
+    setSearchResults([]);
+    setSearchError("");
+    setLastGroupedSelectedNodeId("");
+    if (
+      (!includeSchema && knowledgeScope.schemaNodeIds.has(selectedNodeId))
+      || (selectedNodeId && !graph.hasNode(selectedNodeId))
+    ) {
+      setSelectedNodeId("");
+      setFocusedNodeId("");
+      setViewMode("full");
+    }
+  }, [confirmDiscardMarkdownDraft, knowledgeScope.schemaNodeIds, selectedNodeId]);
+
+  const [previousScopedGraph, setPreviousScopedGraph] = useState(scopedGraph);
+  if (previousScopedGraph !== scopedGraph) {
+    setPreviousScopedGraph(scopedGraph);
+    const membershipChanged = previousScopedGraph.order !== scopedGraph.order
+      || previousScopedGraph.someNode((nodeId) => !scopedGraph.hasNode(nodeId));
+    if (membershipChanged) {
+      setSelectedEdgeId("");
+      // Group IDs can be reused for different members after a scope change.
+      if (selectedNodeId && !graph.hasNode(selectedNodeId)) setSelectedNodeId("");
+    }
+    if (pathResult?.path.some((nodeId) => !scopedGraph.hasNode(nodeId))) setPathResult(null);
+    // A live type update can turn the selected instance into a schema term.
+    if (selectedNodeId && graph.hasNode(selectedNodeId) && !scopedGraph.hasNode(selectedNodeId)) {
+      setSelectedNodeId("");
+      setSelectedEdgeId("");
+      setPathResult(null);
+    }
+    if (focusedNodeId && !scopedGraph.hasNode(focusedNodeId)) {
+      setFocusedNodeId("");
+      setViewMode("full");
+    }
+  }
 
 
   const enterLocalGraph = useCallback((nodeId: string) => {
@@ -1687,6 +1738,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
 
       const groupedDisplayGraph = groupedDisplayCandidate?.graph
         ?? resolveDisplayGraph("", EMPTY_PATH, EMPTY_PATH, "grouped", {
+          sourceGraph: scopedGraph,
           aggregationEnabled,
           collapsedNeighborhoodNodeIds,
         }).graph;
@@ -1711,7 +1763,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
 
     setFocusedNodeId("");
     setSelectedNodeId((currentSelectedNodeId) => (
-      currentSelectedNodeId && graph.hasNode(currentSelectedNodeId) ? currentSelectedNodeId : ""
+      currentSelectedNodeId && scopedGraph.hasNode(currentSelectedNodeId) ? currentSelectedNodeId : ""
     ));
     setViewMode("full");
   }, [
@@ -1725,6 +1777,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     groupedViewReason,
     lastGroupedSelectedNodeId,
     selectedNodeId,
+    scopedGraph,
     viewMode,
   ]);
 
@@ -1741,6 +1794,11 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
 
     const currentDisplayGraph = pluginRuntimeRef.current?.displayGraph ?? graph;
     const nextSelectedNodeId = nodeId;
+    if (knowledgeScope.schemaNodeIds.has(nodeId) && !includeOntologySchema) {
+      setIncludeOntologySchema(true);
+      setViewMode("full");
+      setFocusedNodeId("");
+    }
 
     if (!graph.hasNode(nodeId) && currentDisplayGraph.hasNode(nodeId)) {
       setLastGroupedSelectedNodeId(nodeId);
@@ -1751,11 +1809,11 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     setPathResult(null);
     setSearchResults([]);
     setSearchError("");
-    if (viewMode === "focused" && graph.hasNode(nextSelectedNodeId)) {
+    if (viewMode === "focused" && scopedGraph.hasNode(nextSelectedNodeId)) {
       setFocusedNodeId(nextSelectedNodeId);
       setIsLayoutRunning(false);
     }
-  }, [confirmDiscardMarkdownDraft, selectedNodeId, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
+  }, [confirmDiscardMarkdownDraft, includeOntologySchema, knowledgeScope.schemaNodeIds, scopedGraph, selectedNodeId, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
 
   useEffect(() => {
     if (!externalFocusNodeId || externalFocusToken == null) return;
@@ -1771,6 +1829,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     // a stale viewMode in its closure. setViewMode is called first so the node
     // is visible in the full graph before the scene pans to it.
     setViewMode("full");
+    if (knowledgeScope.schemaNodeIds.has(externalFocusNodeId)) setIncludeOntologySchema(true);
     setSelectedNodeId(externalFocusNodeId);
     setSelectedEdgeId("");
     window.setTimeout(() => {
@@ -1781,6 +1840,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     externalFocusNodeId,
     externalFocusToken,
     graphReady,
+    knowledgeScope.schemaNodeIds,
     selectedNodeId,
   ]);
 
@@ -1857,6 +1917,9 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
         throw new Error(`Path lookup failed with status ${response.status}`);
       }
       const data: PathResponse = await response.json();
+      if (data.path?.some((nodeId) => knowledgeScope.schemaNodeIds.has(nodeId))) {
+        setIncludeOntologySchema(true);
+      }
       setPathResult(data);
       if (data.path?.length) {
         const lastStep = data.path[data.path.length - 1];
@@ -1868,7 +1931,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       console.error("[GraphWorkspace] path trace failed", pathError);
       setPathResult(null);
     }
-  }, [inspectableNodeId, pathTargetId]);
+  }, [inspectableNodeId, knowledgeScope.schemaNodeIds, pathTargetId]);
 
   const handleDownloadProvenance = useCallback(async (format: "json" | "markdown") => {
     if (!inspectableNodeId) return;
@@ -2007,7 +2070,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     : heatmapEnabled
       ? "heatmap"
       : distanceMode;
-  const distanceAnchorNodeId = viewMode === "full" && selectedNodeId && graph.hasNode(selectedNodeId)
+  const distanceAnchorNodeId = viewMode === "full" && selectedNodeId && scopedGraph.hasNode(selectedNodeId)
     ? selectedNodeId
     : "";
   const distanceAnchorLabel = distanceAnchorNodeId
@@ -2021,22 +2084,22 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
   const structuralDistances = useMemo(
     () => (
       distanceAnchorNodeId && activeDistanceMode !== "off"
-        ? buildStructuralDistanceSnapshot(graph, distanceAnchorNodeId, distanceMaxHops)
+        ? buildStructuralDistanceSnapshot(scopedGraph, distanceAnchorNodeId, distanceMaxHops)
         : EMPTY_DISTANCE_RECORD
     ),
-    [activeDistanceMode, distanceAnchorNodeId, distanceMaxHops, graphVersion],
+    [activeDistanceMode, distanceAnchorNodeId, distanceMaxHops, graphVersion, scopedGraph],
   );
   const distanceCounts = useMemo(
-    () => summarizeDistanceBuckets(structuralDistances, graph.order),
-    [structuralDistances, graphVersion],
+    () => summarizeDistanceBuckets(structuralDistances, scopedGraph.order),
+    [structuralDistances, graphVersion, scopedGraph],
   );
   const heatmapRenderSnapshot = useMemo(
     () => (
       activeDistanceMode === "heatmap" && distanceAnchorNodeId
-        ? buildHeatmapRenderSnapshot(graph, distanceAnchorNodeId, structuralDistances, HEATMAP_DISTANCE_MAX_HOPS)
+        ? buildHeatmapRenderSnapshot(scopedGraph, distanceAnchorNodeId, structuralDistances, HEATMAP_DISTANCE_MAX_HOPS)
         : null
     ),
-    [activeDistanceMode, distanceAnchorNodeId, graphVersion, structuralDistances],
+    [activeDistanceMode, distanceAnchorNodeId, graphVersion, scopedGraph, structuralDistances],
   );
 
   useEffect(() => {
@@ -2253,18 +2316,18 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
 
   const showLoadingOverlay = !graphReady && (isLoading || isFetching || Boolean(loadingProgress) || isGraphLoadError);
   const showSettlingStatus = graphReady && loadingProgress?.phase === "stabilizing_layout";
-  const hasGraphContent = Boolean(summary?.nodeCount);
+  const hasGraphContent = scopedGraph.order > 0;
   const activePath = pathResult?.path ?? EMPTY_PATH;
   const activePathEdgeIds = pathResult?.edge_ids ?? EMPTY_PATH;
   const structuralSelectedNodeId = useMemo(() => {
     if (viewMode === "focused") {
-      return focusedNodeId && graph.hasNode(focusedNodeId) ? focusedNodeId : "";
+      return focusedNodeId && scopedGraph.hasNode(focusedNodeId) ? focusedNodeId : "";
     }
-    if (!selectedNodeId || !graph.hasNode(selectedNodeId)) {
+    if (!selectedNodeId || !scopedGraph.hasNode(selectedNodeId)) {
       return "";
     }
     return collapsedNeighborhoodNodeIds.includes(selectedNodeId) ? selectedNodeId : "";
-  }, [collapsedNeighborhoodNodeIds, focusedNodeId, selectedNodeId, viewMode]);
+  }, [collapsedNeighborhoodNodeIds, focusedNodeId, scopedGraph, selectedNodeId, viewMode]);
   const structuralActivePath = structuralSelectedNodeId ? activePath : EMPTY_PATH;
   const structuralActivePathEdgeIds = structuralSelectedNodeId ? activePathEdgeIds : EMPTY_PATH;
   const displayResult = useMemo(() => {
@@ -2273,10 +2336,12 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     void graphVersion;
     return viewMode === "grouped"
       ? (groupedDisplayCandidate ?? resolveDisplayGraph("", EMPTY_PATH, EMPTY_PATH, "grouped", {
+          sourceGraph: scopedGraph,
           aggregationEnabled,
           collapsedNeighborhoodNodeIds,
         }))
       : resolveDisplayGraph(structuralSelectedNodeId, structuralActivePath, structuralActivePathEdgeIds, viewMode, {
+          sourceGraph: scopedGraph,
           aggregationEnabled,
           collapsedNeighborhoodNodeIds,
         });
@@ -2285,6 +2350,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     collapsedNeighborhoodNodeIds,
     graphVersion,
     groupedDisplayCandidate,
+    scopedGraph,
     structuralActivePath,
     structuralActivePathEdgeIds,
     structuralSelectedNodeId,
@@ -2306,6 +2372,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
             focusedUnavailableReason: focusedSelectionResolution.reason,
           })
         : resolveDisplayStateSnapshot(selectedNodeId, activePath, viewMode, {
+            sourceGraph: scopedGraph,
             aggregationEnabled,
             collapsedNeighborhoodNodeIds,
             groupedViewAvailable,
@@ -2326,6 +2393,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       groupedViewAvailable,
       groupedViewReason,
       selectedNodeId,
+      scopedGraph,
       viewMode,
     ],
   );
@@ -2384,7 +2452,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       return null;
     }
 
-    const localNeighborCount = graph.neighbors(selectedNodeId).length;
+    const localNeighborCount = scopedGraph.hasNode(selectedNodeId) ? scopedGraph.neighbors(selectedNodeId).length : 0;
     if (viewMode === "focused") {
       const visibleNeighbors = displayState.selectedVisibleNeighborIds.length || Math.min(localNeighborCount, 16);
       return `${visibleNeighbors + 1} nodes in focused view`;
@@ -2399,11 +2467,11 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     }
 
     return `${localNeighborCount} direct neighbors highlighted`;
-  }, [displayState, selectedNodeId, viewMode]);
+  }, [displayState, scopedGraph, selectedNodeId, viewMode]);
   const graphSummary = summary as GraphLoadSummary | null;
   const selectedNodeState = useMemo(
-    () => buildSelectedNodeState(selectedNodeId, displayState),
-    [displayState, selectedNodeId, summary?.nodeCount, summary?.edgeCount],
+    () => buildSelectedNodeState(selectedNodeId, displayState, scopedGraph),
+    [displayState, scopedGraph, selectedNodeId, summary?.nodeCount, summary?.edgeCount],
   );
   const selectedEdgeState = useMemo(
     () => buildSelectedEdgeState(selectedEdgeId, displayResult.graph),
@@ -2593,10 +2661,10 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
       return pluginRuntimeRef.current;
     },
     get graph() {
-      return graph;
+      return scopedGraph;
     },
     get displayGraph() {
-      return pluginRuntimeRef.current?.displayGraph ?? graph;
+      return pluginRuntimeRef.current?.displayGraph ?? scopedGraph;
     },
     theme: GRAPH_THEME,
     getInteractionState: () => pluginInteractionStateRef.current,
@@ -2621,6 +2689,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
     graphSummary,
     handlePluginAction,
     pluginPanelState,
+    scopedGraph,
     selectedNodeId,
     selectedNodeState,
     temporalState,
@@ -3119,7 +3188,13 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                     <MetricChip>{getGraphLoadTitle(loadingProgress.phase)}</MetricChip>
                   ) : null}
                   {summary ? (
-                    <MetricChip>{summary.nodeCount.toLocaleString()} nodes · {summary.edgeCount.toLocaleString()} edges</MetricChip>
+                    <>
+                      <MetricChip>{displayResult.graph.order.toLocaleString()} nodes · {displayResult.graph.size.toLocaleString()} edges shown</MetricChip>
+                      <MetricChip>{graph.order.toLocaleString()} nodes · {graph.size.toLocaleString()} edges total</MetricChip>
+                    </>
+                  ) : null}
+                  {knowledgeScope.hiddenNodeCount > 0 ? (
+                    <MetricChip>{knowledgeScope.hiddenNodeCount.toLocaleString()} schema nodes hidden</MetricChip>
                   ) : null}
                   {activeNodeCount !== null ? (
                     <MetricChip tone="success">{activeNodeCount.toLocaleString()} active</MetricChip>
@@ -3138,6 +3213,14 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                     }}
                   />
                   <SegmentedModeControl items={viewModeItems} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAPH_THEME.ui.text.body }}>
+                    <input
+                      type="checkbox"
+                      checked={includeOntologySchema}
+                      onChange={(event) => handleSchemaScopeChange(event.target.checked)}
+                    />
+                    Include ontology schema
+                  </label>
                   <div className="explore-toolbelt">
                     {toolbarClusters.map((group) => (
                       <ToolbarCluster
@@ -3326,6 +3409,14 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
                     error={graphLoadErrorMessage}
                     onRetry={handleRetryGraphLoad}
                   />
+                  {graphReady && !showLoadingOverlay && !hasGraphContent && knowledgeScope.hiddenNodeCount > 0 ? (
+                    <div className="graph-loading-overlay" role="status">
+                      <div className="graph-loading-card" style={{ color: GRAPH_THEME.ui.text.body }}>
+                        <strong>No instance, rule, or evidence nodes in this graph.</strong>
+                        <p>This graph contains ontology schema only. Enable “Include ontology schema” to browse its definitions.</p>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

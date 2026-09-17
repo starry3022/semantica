@@ -1,4 +1,4 @@
-import type { OntologyEvidenceContext } from "./api";
+import type { OntologyEvidenceContext, OntologyGraphNode } from "./api";
 import type { OntologyUrlState } from "./ontologyUrlState";
 
 export type OntologyTab = "registry" | "editor" | "versions" | "alignments" | "health" | "shacl";
@@ -61,6 +61,11 @@ export function classifyNodeType(rawType: string): EditorEntityType {
   if (type === "owl:Class" || type === "rdfs:Class") return "class";
   if (type.includes("Property")) return "property";
   return "external";
+}
+
+export function canEditOwnedOntologyTerm(node: OntologyGraphNode | undefined, ontologyUri: string): boolean {
+  return Boolean(node && node.properties?.scheme_uri === ontologyUri
+    && ["owl:Class", "rdfs:Class", "owl:ObjectProperty", "owl:DatatypeProperty"].includes(compactNodeType(node.type)));
 }
 
 // Last-resort guess, reached only when the backend gave no verdict: it has no

@@ -84,6 +84,60 @@ export type OntologyGraphResponse = {
   edges: OntologyGraphEdge[];
 };
 
+export type OntologyTermSnapshot = {
+  ontology_uri: string;
+  term_uri: string;
+  revision: string;
+  scope: "session";
+  changed?: boolean;
+  term: {
+    id: string;
+    type: "owl:Class" | "owl:ObjectProperty" | "owl:DatatypeProperty";
+    label: string;
+    comment: string;
+    parents: string[];
+    domain: string[];
+    range: string[];
+  };
+};
+
+export type OntologyTermEdit = Pick<OntologyTermSnapshot["term"], "label" | "comment" | "parents" | "domain" | "range"> & { expected_revision: string };
+
+async function readOntologyTermResponse(response: Response, ontologyUri: string, termUri: string): Promise<OntologyTermSnapshot> {
+  const data = await response.json();
+  if (!response.ok) {
+    const detail = data?.detail;
+    const message = typeof detail === "string" ? detail : typeof detail?.message === "string" ? detail.message : Array.isArray(detail)
+      ? detail.map((issue: { msg?: string }) => issue.msg || "Invalid field").join("; ")
+      : `Term request failed (${response.status}).`;
+    throw new Error(message);
+  }
+  const term = data?.term;
+  const stringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+  if (data?.ontology_uri !== ontologyUri || data?.term_uri !== termUri || data?.scope !== "session"
+      || typeof data?.revision !== "string" || !data.revision || term?.id !== termUri
+      || !["owl:Class", "owl:ObjectProperty", "owl:DatatypeProperty"].includes(term?.type)
+      || typeof term?.label !== "string" || typeof term?.comment !== "string"
+      || !stringList(term?.parents) || !stringList(term?.domain) || !stringList(term?.range)) {
+    throw new Error("Term definition could not be loaded: mismatched or invalid response.");
+  }
+  return data as OntologyTermSnapshot;
+}
+
+export async function loadOntologyTerm(ontologyUri: string, termUri: string, signal: AbortSignal): Promise<OntologyTermSnapshot> {
+  const query = new URLSearchParams({ ontology_uri: ontologyUri, term_uri: termUri });
+  return readOntologyTermResponse(await fetch(`/api/ontology/term?${query}`, { signal }), ontologyUri, termUri);
+}
+
+export async function saveOntologyTerm(ontologyUri: string, termUri: string, edit: OntologyTermEdit): Promise<OntologyTermSnapshot> {
+  const query = new URLSearchParams({ ontology_uri: ontologyUri, term_uri: termUri });
+  return readOntologyTermResponse(await fetch(`/api/ontology/term?${query}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(edit),
+  }), ontologyUri, termUri);
+}
+
 export type OntologyEntityOwner = {
   // Optional on purpose, unlike OntologyGraphNode.entity_type. There, a missing
   // field degrades to a read-only node — benign. Here it would be read as an
