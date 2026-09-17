@@ -25,11 +25,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { loadOntologyEntityOwner, loadOntologyGraph } from "./api";
-import type { OntologyGraphEdge, OntologyGraphNode } from "./api";
+import type { OntologyEvidenceContext, OntologyGraphEdge, OntologyGraphNode } from "./api";
+import { OntologyRuleEvidencePanel } from "./OntologyRuleEvidencePanel";
 import {
   classifyNodeType,
   isEditableEntityType,
   ONTOLOGY_MINIMAP_THEME,
+  partitionOntologyRegistry,
   resolveEditorOntology,
 } from "./ontologyEditorModel";
 import type { EditorEntityType, RegistryEntry } from "./ontologyEditorModel";
@@ -39,6 +41,7 @@ type OntologyNodeData = {
   label?: string;
   type?: string;
   entityType?: EditorEntityType;
+  description?: string;
 };
 
 type OntologyNode = Node<OntologyNodeData>;
@@ -196,6 +199,7 @@ function buildEditorElements(apiNodes: OntologyGraphNode[], apiEdges: OntologyGr
       label: nodeLabel(node),
       type: node.type,
       entityType: classifyEditorNode(node),
+      description: typeof node.properties?.["rdfs:comment"] === "string" ? node.properties["rdfs:comment"] : undefined,
     },
   })));
   const edges: OntologyEdge[] = apiEdges.map((edge, index) => ({
@@ -212,7 +216,7 @@ function buildEditorElements(apiNodes: OntologyGraphNode[], apiEdges: OntologyGr
   return { nodes, edges };
 }
 
-export function OntologyEditor() {
+export function OntologyEditor({ evidenceContext }: { evidenceContext?: OntologyEvidenceContext }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<OntologyNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<OntologyEdge>([]);
   const [selectedElement, setSelectedElement] = useState<OntologyNode | OntologyEdge | null>(null);
@@ -238,6 +242,11 @@ export function OntologyEditor() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [showContext, setShowContext] = useState<{ x: number; y: number; type: string; element: OntologyNode | OntologyEdge } | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const readOnly = Boolean(evidenceContext?.configured && !editing);
+  const businessOntology = Boolean(evidenceContext?.configured && evidenceContext.business_ontologies.includes(ontologyUri));
+  const registryGroups = partitionOntologyRegistry(registry, evidenceContext);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,7 +260,7 @@ export function OntologyEditor() {
       .then(([entries, ownerVerdict]: [RegistryEntry[], string | null | undefined]) => {
         if (cancelled) return;
         setRegistry(entries);
-        const resolution = resolveEditorOntology(entries, requested, ownerVerdict);
+        const resolution = resolveEditorOntology(entries, requested, ownerVerdict, evidenceContext);
         // The registry default is the right landing place for "no entity asked
         // for", but not for "the backend says nothing owns the entity that was
         // asked for" — that would open an arbitrary ontology whose graph
@@ -262,7 +271,8 @@ export function OntologyEditor() {
         }
         setUnownedEntity("");
         const resolvedOntology = resolution.status === "resolved" ? resolution.uri : undefined;
-        setOntologyUri((current) => current || resolvedOntology || entries[0]?.uri || "");
+        setOntologyUri((current) => current || resolvedOntology || (!evidenceContext?.configured ? entries[0]?.uri : "") || "");
+        if (evidenceContext?.configured && resolvedOntology && !evidenceContext.business_ontologies.includes(resolvedOntology)) setAdvancedOpen(true);
       })
       .catch((error) => {
         console.error("Failed to load ontology registry:", error);
@@ -270,7 +280,7 @@ export function OntologyEditor() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [evidenceContext]);
 
   useEffect(() => {
     if (!ontologyUri) {
@@ -281,10 +291,14 @@ export function OntologyEditor() {
     }
 
     const controller = new AbortController();
+    setSelectedElement(null);
+    setNodes([]);
+    setEdges([]);
     setIsLoadingGraph(true);
     setGraphError("");
     loadOntologyGraph(ontologyUri, controller.signal)
       .then((payload) => {
+        if (controller.signal.aborted) return;
         const elements = buildEditorElements(payload.nodes, payload.edges);
         setNodes(elements.nodes);
         setEdges(elements.edges);
@@ -534,9 +548,10 @@ export function OntologyEditor() {
   };
 
   const detailPanelStyle: React.CSSProperties = {
-    flex: "0 0 320px",
-    width: "320px",
-    minWidth: "320px",
+    flex: businessOntology ? "0 0 380px" : "0 0 320px",
+    width: businessOntology ? "380px" : "320px",
+    minWidth: "280px",
+    maxWidth: "45%",
     boxSizing: "border-box",
     background: "rgba(9, 19, 34, 0.95)",
     borderLeft: "1px solid rgba(140, 192, 255, 0.12)",
@@ -545,28 +560,49 @@ export function OntologyEditor() {
     backdropFilter: "blur(18px)",
   };
 
+  const changeOntology = (uri: string) => {
+    setOntologyUri(uri);
+    setSelectedElement(null);
+    setShowContext(null);
+    setUnownedEntity("");
+    setEditing(false);
+    clearEntitySelection();
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#07111f" }}>
       <style>{ontologyFlowThemeCss}</style>
       <div style={toolbarStyle}>
         <select
           aria-label="Active ontology"
-          value={ontologyUri}
-          onChange={(event) => {
-            setOntologyUri(event.target.value);
-            setSelectedElement(null);
-            setUnownedEntity("");
-            clearEntitySelection();
-          }}
+          value={registryGroups.primary.some((entry) => entry.uri === ontologyUri) ? ontologyUri : ""}
+          onChange={(event) => changeOntology(event.target.value)}
           style={selectStyle}
         >
-          <option value="">Select ontology...</option>
-          {registry.map((entry) => (
+          <option value="">{evidenceContext?.configured ? "Select business ontology..." : "Select ontology..."}</option>
+          {registryGroups.primary.map((entry) => (
             <option key={entry.uri} value={entry.uri}>
               {entry.name || entry.uri}
             </option>
           ))}
         </select>
+        {evidenceContext?.configured ? <details open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)} style={{ color: "#8fa8c6", fontSize: 12, maxWidth: "100%" }}>
+          <summary style={{ cursor: "pointer", padding: "8px 12px" }}>Technical vocabulary & advanced editing</summary>
+          <div style={{ display: "grid", gap: 10, padding: "10px 0" }}>
+            {registryGroups.auxiliary.length ? <label style={{ display: "grid", gap: 6 }}>
+              Technical and other ontologies
+              <select aria-label="Technical or other ontology" style={selectStyle} value={registryGroups.auxiliary.some((entry) => entry.uri === ontologyUri) ? ontologyUri : ""} onChange={(event) => changeOntology(event.target.value)}>
+                <option value="">Select auxiliary ontology...</option>
+                {registryGroups.auxiliary.map((entry) => <option key={entry.uri} value={entry.uri}>{entry.name || entry.uri}</option>)}
+              </select>
+            </label> : <span>No auxiliary vocabulary is loaded.</span>}
+            <label style={{ display: "flex", gap: 7, alignItems: "center" }}>
+              <input type="checkbox" checked={editing} onChange={(event) => { setEditing(event.target.checked); setShowContext(null); }} />
+              Enable advanced editing
+            </label>
+          </div>
+        </details> : null}
+        {!readOnly ? <>
         <button style={toolbarButtonStyle} onClick={addClass}>
           <Plus size={14} />
           Add Class
@@ -587,15 +623,16 @@ export function OntologyEditor() {
           <FileText size={14} />
           Add Axiom
         </button>
+        </> : null}
         <button style={toolbarButtonStyle} onClick={autoLayout}>
           <Layout size={14} />
           Auto Layout
         </button>
         <div style={{ flex: 1 }} />
-        <button style={toolbarButtonStyle} onClick={saveDraft} disabled={isSaving}>
+        {!readOnly ? <button style={toolbarButtonStyle} onClick={saveDraft} disabled={isSaving}>
           <Send size={14} />
           {isSaving ? "Saving..." : "Propose"}
-        </button>
+        </button> : null}
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
@@ -606,12 +643,15 @@ export function OntologyEditor() {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
+            onConnect={readOnly ? undefined : onConnect}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            deleteKeyCode={readOnly ? null : "Backspace"}
             onInit={setFlowInstance}
             onNodeClick={(_, node) => selectNode(node)}
             onEdgeClick={(_, edge) => setSelectedElement(edge)}
-            onNodeContextMenu={handleNodeContextMenu}
-            onEdgeContextMenu={handleEdgeContextMenu}
+            onNodeContextMenu={readOnly ? undefined : handleNodeContextMenu}
+            onEdgeContextMenu={readOnly ? undefined : handleEdgeContextMenu}
             nodeTypes={nodeTypes}
             fitView
             style={{ background: "#07111f" }}
@@ -634,6 +674,9 @@ export function OntologyEditor() {
           )}
           {!isLoadingGraph && !graphError && !unownedEntity && ontologyUri && nodes.length === 0 && (
             <div style={canvasMessageStyle}>This ontology has no editable classes or properties.</div>
+          )}
+          {!isLoadingGraph && !graphError && !unownedEntity && !ontologyUri && evidenceContext?.configured && (
+            <div style={canvasMessageStyle}>No configured business ontology is loaded. Load it from Advanced ontology tools → Registry, or open an auxiliary vocabulary.</div>
           )}
 
           {showContext && (
@@ -690,9 +733,9 @@ export function OntologyEditor() {
                   <input
                     type="text"
                     value={String(selectedElement.data.label ?? "")}
-                    readOnly={!isEditableEntityType(selectedElement.data.entityType)}
+                    readOnly={readOnly || !isEditableEntityType(selectedElement.data.entityType)}
                     onChange={(e) => {
-                      if (!isEditableEntityType(selectedElement.data.entityType)) return;
+                      if (readOnly || !isEditableEntityType(selectedElement.data.entityType)) return;
                       setNodes((nds) =>
                         nds.map((n) =>
                           n.id === selectedElement.id
@@ -728,6 +771,11 @@ export function OntologyEditor() {
                     }}
                   />
                 </div>
+                {selectedElement.data.description ? <div style={{ marginBottom: 16 }}>
+                  <div style={{ color: "#8fa8c6", fontSize: 12, marginBottom: 6 }}>Definition & source notes</div>
+                  <div style={{ color: "#ebf3ff", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{selectedElement.data.description}</div>
+                </div> : null}
+                {businessOntology && isEditableEntityType(selectedElement.data.entityType) ? <OntologyRuleEvidencePanel ontologyUri={ontologyUri} termUri={selectedElement.id} /> : null}
                 <div style={{ marginBottom: "12px" }}>
                   <label style={{ display: "block", color: "#8fa8c6", fontSize: "12px", marginBottom: "4px" }}>
                     Type

@@ -1,3 +1,21 @@
+import type { OntologyEvidenceContext } from "./api";
+import type { OntologyUrlState } from "./ontologyUrlState";
+
+export type OntologyTab = "registry" | "editor" | "versions" | "alignments" | "health" | "shacl";
+
+export function initialOntologyTab(state: OntologyUrlState, configured: boolean): OntologyTab {
+  if (["registry", "editor", "versions", "alignments", "health", "shacl"].includes(state.tab || "")) return state.tab as OntologyTab;
+  return state.entityUri || configured ? "editor" : "registry";
+}
+
+export function partitionOntologyRegistry(entries: RegistryEntry[], context?: OntologyEvidenceContext) {
+  if (!context?.configured) return { primary: entries, auxiliary: [] as RegistryEntry[] };
+  return {
+    primary: entries.filter((entry) => context.business_ontologies.includes(entry.uri)),
+    auxiliary: entries.filter((entry) => !context.business_ontologies.includes(entry.uri)),
+  };
+}
+
 export type EditorEntityType = "ontology" | "class" | "property" | "external";
 
 export type RegistryEntry = {
@@ -79,9 +97,14 @@ export function resolveEditorOntology(
   entries: RegistryEntry[],
   entityUri: string,
   ownerVerdict: string | null | undefined,
+  evidenceContext?: OntologyEvidenceContext,
 ): EditorOntologyResolution {
   if (ownerVerdict === null) {
     return { status: "unowned", entityUri };
+  }
+  if (!entityUri && evidenceContext?.configured) {
+    const uri = evidenceContext.business_ontologies.find((candidate) => entries.some((entry) => entry.uri === candidate));
+    return uri ? { status: "resolved", uri } : { status: "unresolved" };
   }
   const uri = inferOntologyUri(entries, entityUri, ownerVerdict);
   return uri === undefined ? { status: "unresolved" } : { status: "resolved", uri };

@@ -173,6 +173,43 @@ def test_generation_exports_grounded_rdf_and_separate_support_vocabulary(
     assert all(SECRET not in path.read_text() for path in output.iterdir())
 
 
+def test_source_id_exports_replayable_evidence_context_without_changing_rdf(
+    cli, inputs, tmp_path, response
+):
+    response["classes"][0]["evidence_quote"] = "采购申请属于申请。"
+    original = tmp_path / "original"
+    generate(cli, inputs, original, response)
+    output = tmp_path / "linked"
+    with patch("semantica.ontology.llm_generator.create_provider") as provider:
+        assert (
+            cli.main(
+                arguments(inputs, output, replay=original / "ontology.json")
+                + ["--source-id", "registered-policy"]
+            )
+            == 0
+        )
+    provider.assert_not_called()
+    context_path = output / "ontology-evidence-context.json"
+    context = json.loads(context_path.read_text())
+    assert context["business_ontologies"][0]["uri"] == BASE
+    terms = context["business_ontologies"][0]["terms"]
+    assert len(terms) == 5
+    assert {item["source_id"] for item in terms} == {"registered-policy"}
+    request = next(item for item in terms if item["uri"] == BASE + "PurchaseRequest")
+    assert request["parents"] == [BASE + "Application"]
+    prop = next(item for item in terms if item["uri"] == BASE + "requiresContract")
+    assert prop["domain"] == [BASE + "PurchaseRequest"]
+    assert prop["range"] == [BASE + "Contract"]
+    assert isomorphic(
+        Graph().parse(original / "ontology.ttl"), Graph().parse(output / "ontology.ttl")
+    )
+    summary = json.loads((output / "SUMMARY.json").read_text())
+    assert (
+        summary["artifacts"][context_path.name]
+        == hashlib.sha256(context_path.read_bytes()).hexdigest()
+    )
+
+
 def test_replay_calls_no_provider_and_rechecks_rdf(cli, inputs, tmp_path, response):
     generated = tmp_path / "generated"
     generate(cli, inputs, generated, response)

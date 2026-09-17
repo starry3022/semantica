@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BookMarked,
   GitMerge,
@@ -14,14 +14,10 @@ import { OntologyEditor } from "./OntologyEditor";
 import { ShaclStudio } from "./ShaclStudio";
 import { VersionsTab } from "./VersionsTab";
 import { readOntologyUrlState, writeEntitySelection, writeTab } from "./ontologyUrlState";
+import { initialOntologyTab, type OntologyTab } from "./ontologyEditorModel";
+import { loadOntologyEvidenceContext, type OntologyEvidenceContext } from "./api";
 
-export type OntologyHubTab =
-  | "registry"
-  | "editor"
-  | "versions"
-  | "alignments"
-  | "health"
-  | "shacl";
+export type OntologyHubTab = OntologyTab;
 
 const TABS: { id: OntologyHubTab; label: string; icon: typeof GitMerge }[] = [
   { id: "registry", label: "Registry", icon: BookMarked },
@@ -33,11 +29,7 @@ const TABS: { id: OntologyHubTab; label: string; icon: typeof GitMerge }[] = [
 ];
 
 function readInitialTab(): OntologyHubTab {
-  const { tab, entityUri } = readOntologyUrlState();
-  const requested = TABS.find((candidate) => candidate.id === tab);
-  if (requested) return requested.id;
-  if (entityUri) return "editor";
-  return "registry";
+  return initialOntologyTab(readOntologyUrlState(), false);
 }
 
 interface OntologyWorkspaceProps {
@@ -46,16 +38,41 @@ interface OntologyWorkspaceProps {
 
 export function OntologyWorkspace({ onJumpToGraphNode }: OntologyWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<OntologyHubTab>(readInitialTab);
+  const [evidenceContext, setEvidenceContext] = useState<OntologyEvidenceContext | null>(null);
+  const [contextError, setContextError] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const initialUrl = useRef(readOntologyUrlState());
+  const userSelectedTab = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadOntologyEvidenceContext(controller.signal).then((context) => {
+      if (controller.signal.aborted) return;
+      setEvidenceContext(context);
+      if (!userSelectedTab.current) {
+        const tab = initialOntologyTab(initialUrl.current, context.configured);
+        setActiveTab(tab);
+        setAdvancedOpen(tab !== "editor");
+      }
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setEvidenceContext({ configured: false, business_ontologies: [], support_ontologies: [] });
+      setContextError("Business evidence context could not be loaded. The ontology registry remains available.");
+    });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     writeTab(activeTab);
   }, [activeTab]);
 
   const handleTabChange = useCallback((tab: OntologyHubTab) => {
+    userSelectedTab.current = true;
     setActiveTab(tab);
   }, []);
 
   const handleFixInEditor = useCallback((entityUri: string) => {
+    userSelectedTab.current = true;
     writeEntitySelection(entityUri);
     setActiveTab("editor");
   }, []);
@@ -65,7 +82,7 @@ export function OntologyWorkspace({ onJumpToGraphNode }: OntologyWorkspaceProps)
       case "registry":
         return <OntologyManager />;
       case "editor":
-        return <OntologyEditor />;
+        return <OntologyEditor evidenceContext={evidenceContext || undefined} />;
       case "versions":
         return <VersionsTab />;
       case "alignments":
@@ -77,25 +94,30 @@ export function OntologyWorkspace({ onJumpToGraphNode }: OntologyWorkspaceProps)
     }
   };
 
+  const tabButton = ({ id, label, icon: Icon }: (typeof TABS)[number]) => {
+    const active = activeTab === id;
+    return <button
+      key={id}
+      onClick={() => handleTabChange(id)}
+      aria-pressed={active}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 13px", borderRadius: 999, border: `1px solid ${active ? "var(--ws-border-strong)" : "transparent"}`, background: active ? "var(--ws-accent-soft)" : "transparent", color: active ? "var(--ws-text)" : "var(--ws-text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "160ms ease" }}
+    ><Icon size={13} />{evidenceContext?.configured && id === "editor" ? "Business graph" : label}</button>;
+  };
+
   return (
     <div className="ws-page">
       {/* Internal sub-tab bar */}
       <div style={{ display: "flex", gap: 4, padding: "8px 16px", borderBottom: "1px solid var(--ws-border)", background: "rgba(0,0,0,0.18)", flexShrink: 0, flexWrap: "wrap" }}>
-        {TABS.map(({ id, label, icon: Icon }) => {
-          const active = activeTab === id;
-          return (
-            <button
-              key={id}
-              onClick={() => handleTabChange(id)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 13px", borderRadius: 999, border: `1px solid ${active ? "var(--ws-border-strong)" : "transparent"}`, background: active ? "var(--ws-accent-soft)" : "transparent", color: active ? "var(--ws-text)" : "var(--ws-text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "160ms ease" }}
-            >
-              <Icon size={13} />
-              {label}
-            </button>
-          );
-        })}
+        {evidenceContext?.configured ? <>
+          {TABS.filter((tab) => tab.id === "editor").map(tabButton)}
+          <details open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)} style={{ color: "var(--ws-text-muted)", fontSize: 12 }}>
+            <summary style={{ cursor: "pointer", padding: "6px 13px" }}>Advanced ontology tools</summary>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", paddingTop: 6 }}>{TABS.filter((tab) => tab.id !== "editor").map(tabButton)}</div>
+          </details>
+        </> : TABS.map(tabButton)}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>{renderTab()}</div>
+      {contextError ? <div role="status" style={{ padding: "8px 16px", color: "#f2b66d", fontSize: 12 }}>{contextError}</div> : null}
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>{evidenceContext ? renderTab() : <div role="status" style={{ padding: 20 }}>Loading ontology context…</div>}</div>
     </div>
   );
 }

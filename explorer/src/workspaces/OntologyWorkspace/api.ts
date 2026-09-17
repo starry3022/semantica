@@ -9,6 +9,59 @@ import type {
   ShaclValidationResponse,
 } from "./types";
 
+export type OntologyEvidenceContext = {
+  configured: boolean;
+  business_ontologies: string[];
+  support_ontologies: string[];
+};
+
+export type OntologyRuleEvidence = {
+  id: string;
+  clause_id: string | null;
+  role: "primary" | "supporting" | "unknown";
+  quote: string;
+  start_char: number;
+  end_char: number;
+  source_id: string;
+  source_sha256: string;
+  links: { term_uri: string; label: string; kind: "direct" | "property"; relation: string | null }[];
+};
+
+export type OntologyRelatedRules = {
+  ontology_uri: string;
+  term_uri: string;
+  status: "ready" | "unconfigured" | "unavailable";
+  term: { id: string; label: string; type: string; description: string };
+  association_status: "candidate";
+  associations: {
+    node_id: string;
+    label: string;
+    modality: string | null;
+    fact_status: string | null;
+    review_status: string | null;
+    evidence: OntologyRuleEvidence[];
+  }[];
+  anchors: { term_uri: string; label: string; status: string; reason: string | null }[];
+  evidence_issues?: { id: string; clause_id: string | null; status: string; reason: string | null }[];
+  notice: string;
+};
+
+export async function loadOntologyEvidenceContext(signal?: AbortSignal): Promise<OntologyEvidenceContext> {
+  const response = await fetch("/api/ontology/evidence-context", { signal });
+  // Hosts predating source registration still support the existing ontology UI.
+  if (response.status === 404) return { configured: false, business_ontologies: [], support_ontologies: [] };
+  return parseResponse<OntologyEvidenceContext>(response);
+}
+
+export async function loadOntologyRelatedRules(ontologyUri: string, termUri: string, signal: AbortSignal): Promise<OntologyRelatedRules> {
+  const query = new URLSearchParams({ ontology_uri: ontologyUri, term_uri: termUri });
+  const result = await parseResponse<OntologyRelatedRules>(await fetch(`/api/ontology/related-rules?${query}`, { signal }));
+  if (result.ontology_uri !== ontologyUri || result.term_uri !== termUri || !Array.isArray(result.associations) || !Array.isArray(result.anchors)) {
+    throw new Error("Rule evidence could not be loaded: mismatched or invalid response.");
+  }
+  return result;
+}
+
 export type OntologyGraphNode = {
   id: string;
   type: string;

@@ -200,46 +200,83 @@ different content hashes for one source ID.
 SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
   --graph /path/to/artifacts/candidate-graph.json \
   --source-manifest /path/to/artifacts/sources.json \
-  --host 127.0.0.1 --port 8007 --no-browser
+  --host 127.0.0.1 --port 8010 --no-browser
 ```
 
 The candidate graph contains rule instances. Each new Explorer session needs an
-explicit schema import. In **Ontology Hub → Load Ontology → File Upload**, load
-the business `ontology.ttl` and the separate `process-vocabulary.ttl` produced by
-the command below. Select the desired ontology in **Editor → Active ontology**.
-The support vocabulary is named **流程与证据支持词汇** in Chinese and **Process
-evidence vocabulary** in English. A graph-only startup has an empty registry.
+explicit schema import. In **Ontology Hub → Registry → Load Ontology → File
+Upload**, load the business `ontology.ttl` and the separate
+`process-vocabulary.ttl` produced by the command below. Then register
+`ontology-evidence-context.json` through the API. Source registration, both
+ontology imports and the evidence context are required for business-to-rule
+navigation. A graph-only startup has an empty registry.
 
 For a repeatable local startup, run the following in another terminal after
 Explorer is healthy. Send the existing file's text to the ontology import API;
 the server does not need filesystem access to that path or an external URL:
 
 ```bash
-python - /path/to/artifacts/ontology.ttl <<'PY'
+python - /path/to/business-artifacts <<'PY'
 import json
 import sys
 import urllib.request
 from pathlib import Path
 
-request = urllib.request.Request(
-    "http://127.0.0.1:8007/api/ontology/load",
-    data=json.dumps({
-        "content": Path(sys.argv[1]).read_text(encoding="utf-8"),
+artifacts = Path(sys.argv[1])
+base_url = "http://127.0.0.1:8010"
+
+def post(path, payload):
+    request = urllib.request.Request(
+        base_url + path,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        print(json.load(response))
+
+for name in ("ontology.ttl", "process-vocabulary.ttl"):
+    post("/api/ontology/load", {
+        "content": (artifacts / name).read_text(encoding="utf-8"),
         "format": "turtle",
-    }).encode("utf-8"),
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(request, timeout=30) as response:
-    print(json.load(response))
+    })
+post("/api/ontology/evidence-context", json.loads(
+    (artifacts / "ontology-evidence-context.json").read_text(encoding="utf-8")
+))
 PY
 ```
 
-This import adds schema nodes and edges to the running session. It preserves the
-saved candidate graph, source registration and evidence review states. Repeat
-the import after restarting a session from the candidate graph. For the supplied
-procurement artifacts, the fixed support vocabulary has 9 classes and 40 properties; importing it
-adds 56 nodes and 72 edges to the 54-node, 96-edge candidate graph.
+The ontology imports add schema nodes and edges to the running session. The
+evidence context only registers navigation metadata; it adds no RDF assertions,
+files or source URLs. These operations preserve the saved candidate graph and
+evidence review states. Repeat the imports and context registration after
+restarting a session. Reopen Ontology Hub after registering the context.
+
+With a registered business context, **Ontology Hub → Business graph** is the
+default view. **Active ontology** lists business ontologies. The graph starts in
+read-only mode; **Technical vocabulary & advanced editing** contains the support
+vocabulary and an explicit **Enable advanced editing** option. **Advanced
+ontology tools** contains Registry and the other existing tools. The support
+vocabulary is named **流程与证据支持词汇** in Chinese and **Process evidence
+vocabulary** in English. Sessions without this context keep the Registry default;
+explicit tab links and technical-term links remain usable.
+
+Select a business class or property, read its definition, and expand **Related
+rules & evidence**. Each association identifies **Direct term citation** or
+**Via property**, with a primary or supporting clause. Select **Primary** or
+**Supporting**, then **Open source material** to inspect the exact highlighted
+span. The full-text dialog still offers all evidence for that rule. Changing the
+concept, ontology or citation clears the previous selection and closes its
+dialog.
+
+Links require the same source ID and content hash, valid exact quotations,
+overlapping nonblank Unicode character spans and an explicit `ProcessRule →
+hasEvidence → Evidence` association. A class may also use a property's citation
+when that property explicitly declares the class in `rdfs:domain` or
+`rdfs:range`; the panel identifies that property. These are candidate citation
+links, not instance type assignments or a complete inventory of rules governing
+the concept. Missing sources, changed definitions, hash/range/quote failures and
+invalid rule evidence show their reasons instead of an apparent successful link.
 
 Select a relationship in Knowledge Explorer and expand **Properties · N — View
 all / collapse** to read every recorded property. Source, context/evidence and
@@ -258,6 +295,7 @@ Generate a separate candidate business ontology with the configured model:
 ```bash
 python examples/ontology_from_text.py \
   --source /path/to/artifacts/source.txt \
+  --source-id maintenance-policy-v3 \
   --config /private/llm-config.json \
   --max-tokens 16384 \
   --base-uri https://example.org/procurement-business/ \
@@ -278,6 +316,17 @@ Chinese `process-vocabulary.ttl`, exact `source.txt`, `prompt.txt`,
 `--config ... --max-tokens ...` with `--replay /saved/ontology.json`; retain the
 saved `prompt.txt` beside it. Replay checks source and prompt hashes and makes no
 model call. Successful artifacts are published only after all checks pass.
+
+The optional `--source-id` must match the Explorer source registry and candidate
+graph. It also exports `ontology-evidence-context.json`, separating business and
+support ontology roles and binding each term to its exact exported snapshot
+(IRI, label, type, comment, domain, range and parents), source ID/hash, quote and
+Unicode span. Line references disambiguate repeated quotations. Older candidates
+without line references need a unique exact quote. An edited definition or schema
+invalidates its previous binding until an updated context is explicitly
+registered. Omitting `--source-id` retains the ontology export without this
+optional navigation artifact. Registration does not fetch URLs or local paths,
+modify the original extraction, or promote `candidate / unreviewed` results.
 
 The prompt requires source-language business labels and definitions, PascalCase
 class identifiers, camelCase property identifiers and evidence selected by
@@ -378,3 +427,20 @@ python -m pytest -q \
   tests/semantic_extract/test_structured_output.py \
   tests/semantic_extract/test_temporal_extraction.py
 ```
+
+Business navigation and source evidence checks:
+
+```bash
+python -m pytest -q \
+  tests/ontology/test_evidence_context.py \
+  tests/ontology/test_ontology_from_text.py \
+  tests/explorer/test_ontology_rule_links.py
+cd explorer
+npm run test:ontology-evidence
+npm run test:graph-workspace
+npm run build
+```
+
+These regressions cover source and term isolation, changed snapshots, invalid
+citations, direct/property links, Unicode ranges, legacy defaults, primary/support
+selection, late responses, concept-switch cleanup and literal HTML display.

@@ -7,14 +7,15 @@ import { evidenceSourceIndex, readSourceView, sourceHighlight, type SourceEviden
 interface SourceEvidencePanelProps {
   kind: "node" | "edge";
   id: string;
+  initialEvidenceId?: string;
 }
 
 export function SourceEvidencePanel(props: SourceEvidencePanelProps) {
   // A changed selection must not paint or reopen the previous source, even for one frame.
-  return <SourceEvidenceSession key={`${props.kind}:${props.id}`} {...props} />;
+  return <SourceEvidenceSession key={JSON.stringify([props.kind, props.id, props.initialEvidenceId])} {...props} />;
 }
 
-function SourceEvidenceSession({ kind, id }: SourceEvidencePanelProps) {
+function SourceEvidenceSession({ kind, id, initialEvidenceId }: SourceEvidencePanelProps) {
   const [view, setView] = useState<SourceView | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
@@ -41,7 +42,7 @@ function SourceEvidenceSession({ kind, id }: SourceEvidencePanelProps) {
           </button>
         </>
       ) : <div style={mutedStyle}>No explicit evidence or source material is linked to this {kind === "edge" ? "relationship" : "node"}.</div>}
-      {open && view ? <SourceMaterialDialog view={view} onClose={() => setOpen(false)} /> : null}
+      {open && view ? <SourceMaterialDialog view={view} initialEvidenceId={initialEvidenceId} onClose={() => setOpen(false)} /> : null}
     </section>
   );
 }
@@ -68,9 +69,10 @@ function RelationshipSourceSelection({ edgeIds }: { edgeIds: string[] }) {
   );
 }
 
-function SourceMaterialDialog({ view, onClose }: { view: SourceView; onClose: () => void }) {
-  const [selectedEvidence, setSelectedEvidence] = useState<SourceEvidence | undefined>(view.evidence[0]);
-  const [sourceIndex, setSourceIndex] = useState(() => view.evidence[0] ? evidenceSourceIndex(view.sources, view.evidence[0]) : 0);
+function SourceMaterialDialog({ view, onClose, initialEvidenceId }: { view: SourceView; onClose: () => void; initialEvidenceId?: string }) {
+  const initialEvidence = initialEvidenceId ? view.evidence.find((evidence) => evidence.id === initialEvidenceId) : view.evidence[0];
+  const [selectedEvidence, setSelectedEvidence] = useState<SourceEvidence | undefined>(initialEvidence);
+  const [sourceIndex, setSourceIndex] = useState(() => initialEvidence ? evidenceSourceIndex(view.sources, initialEvidence) : 0);
   const source = view.sources[sourceIndex];
   const highlight = sourceHighlight(source, selectedEvidence);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -96,7 +98,9 @@ function SourceMaterialDialog({ view, onClose }: { view: SourceView; onClose: ()
     ? highlight
       ? "Citation aligned · Located in source text."
       : `Not located: ${selectedEvidence.reason || selectedEvidence.status.replaceAll("_", " ")}${selectedEvidence.status === "aligned" ? " — the source identity or text range could not be verified." : ""}`
-    : "No evidence selected. Full source material is shown when available.";
+    : initialEvidenceId && !initialEvidence
+      ? "The requested evidence is unavailable. Select an available citation to locate it."
+      : "No evidence selected. Full source material is shown when available.";
   return createPortal(
     <div style={backdropStyle}>
       <div

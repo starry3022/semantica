@@ -20,6 +20,7 @@ from rdflib import Graph, Literal, OWL, RDF, RDFS, URIRef
 from rdflib.compare import isomorphic
 
 from semantica.ontology.llm_generator import LLMOntologyGenerator
+from semantica.ontology.evidence_context import build_evidence_context
 from semantica.ontology.owl_generator import OWLGenerator
 from semantica.semantic_extract.process_graph import (
     CLASSES,
@@ -206,6 +207,15 @@ def run(args):
         "process-vocabulary.ttl": vocabulary.serialize(format="turtle").encode(),
         "validation.json": _json_bytes(validation),
     }
+    if args.source_id is not None:
+        context = build_evidence_context(
+            ontology,
+            turtle.decode("utf-8"),
+            text,
+            args.source_id,
+            [str(vocabulary.value(predicate=RDF.type, object=OWL.Ontology))],
+        )
+        files["ontology-evidence-context.json"] = _json_bytes(context)
     summary = {
         "status": "candidate",
         "mode": mode,
@@ -239,6 +249,10 @@ def main(argv=None):
     )
     parser.add_argument("--base-uri", required=True, help="Business ontology namespace")
     parser.add_argument("--name", help="Business ontology name")
+    parser.add_argument(
+        "--source-id",
+        help="Registered source identity; also export an Explorer evidence context",
+    )
     parser.add_argument("--process-base-uri", default=DEFAULT_BASE)
     parser.add_argument(
         "--max-tokens",
