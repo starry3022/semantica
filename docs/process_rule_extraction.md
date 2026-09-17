@@ -200,6 +200,53 @@ SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
   --host 127.0.0.1 --port 8007 --no-browser
 ```
 
+The candidate graph contains rule instances. Load the separate, explicitly
+generated `ontology.ttl` into each new Explorer session to browse the schema.
+In **Ontology Hub → Load Ontology → File Upload**, select that file and load it.
+The registry then lists **Process Rule Ontology**; **Editor** displays its classes
+and properties. A graph-only startup has an empty ontology registry.
+
+For a repeatable local startup, run the following in another terminal after
+Explorer is healthy. Send the existing file's text to the ontology import API;
+the server does not need filesystem access to that path or an external URL:
+
+```bash
+python - /path/to/artifacts/ontology.ttl <<'PY'
+import json
+import sys
+import urllib.request
+from pathlib import Path
+
+request = urllib.request.Request(
+    "http://127.0.0.1:8007/api/ontology/load",
+    data=json.dumps({
+        "content": Path(sys.argv[1]).read_text(encoding="utf-8"),
+        "format": "turtle",
+    }).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    print(json.load(response))
+PY
+```
+
+This import adds schema nodes and edges to the running session. It preserves the
+saved candidate graph, source registration and evidence review states. Repeat
+the import after restarting a session from the candidate graph. For the supplied
+procurement artifacts, the ontology has 9 classes and 40 properties; importing it
+adds 56 nodes and 72 edges to the 54-node, 96-edge candidate graph.
+
+Select a relationship in Knowledge Explorer and expand **Properties · N — View
+all / collapse** to read every recorded property. Source, context/evidence and
+review/status fields have stable sections regardless of input order. Long text
+keeps its line breaks, nested values use indented JSON, and null, empty text,
+false and zero remain distinct. The list scrolls; collapse it to restore graph
+space. Selecting another relationship clears the previous values and closes
+the list. A relationship without properties shows an explicit empty state.
+These raw fields do not imply verified evidence or business approval; use the
+separate **Source material & evidence** entry for validated source alignment.
+
 Manifest paths must be relative files inside the manifest directory. Absolute
 paths, directory escapes and symlinks escaping that directory are rejected.
 HTTP requests select graph node or edge IDs; they cannot register files or request

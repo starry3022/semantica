@@ -47,6 +47,7 @@ import { SMALL_GRAPH_MAX_NODES } from "./smallGraphLayout";
 import { buildRealtimeEdgeAttributes } from "./realtimeGraphAttributes";
 import type { LinkPrediction, PathResponse } from "./GraphInspectorPanel";
 import { RelationshipSourceEvidence } from "./SourceEvidencePanel";
+import { RelationshipProperties } from "./RelationshipProperties";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 import {
   NodeMarkdownRefreshGuard,
@@ -3295,20 +3296,7 @@ export function GraphWorkspace({ externalFocusNodeId, externalFocusToken, onDirt
 
                   <RelationshipSourceEvidence edgeIds={selectedEdgeState.rawEdgeIds} />
 
-                  {Object.keys(selectedEdgeState.properties).length ? (
-                    <div style={selectedEdgePropertyGridStyle}>
-                      {Object.entries(selectedEdgeState.properties).slice(0, 4).map(([key, value]) => (
-                        <div key={key} style={selectedEdgePropertyCardStyle}>
-                          <div style={{ color: "rgba(127, 208, 255, 0.68)", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                            {key}
-                          </div>
-                          <div style={{ color: "#dce7f4", fontSize: 12, marginTop: 4, wordBreak: "break-word" }}>
-                            {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                  <RelationshipProperties key={selectedEdgeState.id} properties={selectedEdgeState.properties} />
                 </div>
               ) : null}
             </div>
@@ -3533,19 +3521,6 @@ const distanceLegendSwatchStyle: React.CSSProperties = {
   width: 8,
   height: 8,
   borderRadius: 999,
-};
-
-const selectedEdgePropertyGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-  gap: 8,
-};
-
-const selectedEdgePropertyCardStyle: React.CSSProperties = {
-  borderRadius: 10,
-  padding: 10,
-  background: "rgba(255, 255, 255, 0.03)",
-  border: `1px solid ${GRAPH_THEME.ui.surface.panelBorder}`,
 };
 
 const pluginDockContentStyle: React.CSSProperties = {
