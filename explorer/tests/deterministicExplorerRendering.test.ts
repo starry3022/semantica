@@ -204,6 +204,34 @@ test("display graph resolution preserves all 4 nodes and 3 edges in full view", 
   assert.ok(displayGraph.hasEdge("edge_acme_new_york"));
 });
 
+test("focused neighbors retain their names for hover even when their idle labels are suppressed", () => {
+  loadDeterministicTestGraph();
+  const label = "审批组 (all) · 中文😀";
+  for (const id of ["bob", "acme"]) {
+    graph.mergeNodeAttributes(id, { label, labelPriority: 0, labelVisibilityPolicy: "none" });
+  }
+  const original = graph.export();
+  const { graph: focused } = resolveDisplayGraph("alice", [], [], "focused");
+  assert.equal(focused.order, 3, "same-named neighbors remain separate nodes");
+  for (const id of ["bob", "acme"]) {
+    const attrs = focused.getNodeAttributes(id);
+    assert.equal(attrs.label, label, "hiding an idle label must not erase its text");
+    for (const tier of ["overview", "structure", "inspection"] as const) {
+      const idle = resolveNodeElementStyle(GRAPH_THEME, tier, "neighbor", attrs, attrs.label);
+      assert.equal(idle.label, "", "preserving the name must not bypass label visibility policy");
+      const hovered = resolveNodeElementStyle(GRAPH_THEME, tier, "hovered", attrs, attrs.label);
+      assert.equal(hovered.label, label);
+      assert.equal(hovered.forceLabel, true);
+      const selected = resolveNodeElementStyle(GRAPH_THEME, tier, "selected", attrs, attrs.label);
+      assert.equal(selected.label, label);
+    }
+  }
+  const { graph: nextFocus } = resolveDisplayGraph("bob", [], [], "focused");
+  assert.equal(nextFocus.getNodeAttribute("bob", "label"), label);
+  assert.equal(nextFocus.getNodeAttribute("alice", "label"), "Alice");
+  assert.deepEqual(graph.export(), original, "focus and hover must not change the source graph");
+});
+
 test("structural distance calculation resolves correct hop counts across the 3-edge chain", () => {
   loadDeterministicTestGraph();
 

@@ -2614,6 +2614,7 @@ export function createFocusedGraph(
       baseAttrs.label,
     );
 
+    // Preserve the source label so the renderer can reveal it on hover.
     addNode(neighborId, {
       ...baseAttrs,
       x: Number.isFinite(baseAttrs.x) ? baseAttrs.x : Math.cos(angle) * radius,
@@ -2623,7 +2624,6 @@ export function createFocusedGraph(
       baseColor: style.color,
       semanticBaseColor: getSemanticNodeColor(baseAttrs),
       baseSize: Math.max(style.size, 8.5),
-      label: style.label,
     });
   });
 
