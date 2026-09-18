@@ -127,3 +127,69 @@ test("type requests encode identity, forward cancellation and validate response 
   globalThis.fetch = async () => response({ detail: "Not found" }, 404);
   await assert.rejects(loadInstanceTypes(id), /404/);
 });
+
+const conceptReference = {
+  node_id: "rule-1", label: "合法有效的合同", class_uri: "https://example.test/business/Contract", class_label: "合同",
+  ontology_uri: "https://example.test/business/", rationale: "The rule requires a contract document.",
+  status: "candidate", review_status: "unreviewed", evidence_ids: ["e-contract"],
+} as const;
+
+test("explicit concept references are visible and navigate separately from declared classes", () => {
+  const opened: string[] = [];
+  const mapped = { ...snapshot, concept_references: [{ ...conceptReference, evidence_ids: ["e-contract"] }], concept_reference_issues: [] };
+  const view = render(<InstanceTypesPanel {...baseProps} snapshot={mapped} onOpenOntologyEntity={(uri) => opened.push(uri)} />);
+  const concepts = view.getByRole("region", { name: "Business concept references" });
+  const declared = view.getByRole("region", { name: "Declared class" });
+  assert.equal(within(declared).queryByText("合同"), null);
+  const button = within(concepts).getByRole("button", { name: "Open concept 合同" });
+  assert.equal(button.closest("details"), null, "the concept is visible without expanding technical details");
+  fireEvent.click(button);
+  assert.deepEqual(opened, ["https://example.test/business/Contract"]);
+  assert.match(concepts.textContent ?? "", /candidate\s*\/\s*unreviewed/i);
+  assert.match(concepts.textContent ?? "", /not.*instance declaration/i);
+  assert.ok(within(declared).getByText("Process rule"));
+  view.rerender(<InstanceTypesPanel {...baseProps} nodeId="other" snapshot={mapped} />);
+  assert.equal(view.queryByText("合同"), null);
+  view.rerender(<InstanceTypesPanel {...baseProps} snapshot={mapped} loading />);
+  assert.equal(view.queryByRole("region", { name: "Business concept references" }), null);
+});
+
+test("invalid concept references report their reason and never become a clickable mapping", () => {
+  const unavailable = { ...snapshot, concept_references: [], concept_reference_issues: [{ node_id: "rule-1", class_uri: conceptReference.class_uri, reason: "Candidate RDF fingerprint does not match." }] };
+  const view = render(<InstanceTypesPanel {...baseProps} snapshot={unavailable} />);
+  const concepts = view.getByRole("region", { name: "Business concept references" });
+  assert.match(concepts.textContent ?? "", /Candidate RDF fingerprint does not match/);
+  assert.equal(within(concepts).queryByRole("button", { name: /Open concept/ }), null);
+  assert.doesNotMatch(concepts.textContent ?? "", /references \(0\)/i);
+  view.rerender(<InstanceTypesPanel {...baseProps} />);
+  assert.equal(view.queryByRole("region", { name: "Business concept references" }), null, "legacy responses do not gain a misleading mapping section");
+});
+
+test("concept labels and rationale remain literal text and have no external HTML navigation", () => {
+  const html = '<img src=x onerror="window.bad=1">';
+  const mapped = { ...snapshot, concept_references: [{ ...conceptReference, class_label: html, rationale: html, evidence_ids: ["e-contract"] }], concept_reference_issues: [] };
+  const view = render(<InstanceTypesPanel {...baseProps} snapshot={mapped} onOpenOntologyEntity={undefined} />);
+  const button = view.getByRole("button", { name: `Open concept ${html}` });
+  assert.equal((button as HTMLButtonElement).disabled, true);
+  assert.equal(view.container.querySelector("img,script,a[href]"), null);
+});
+
+test("instance-type client rejects foreign, reviewed, or malformed concept references while accepting legacy payloads", async () => {
+  const mapped = { ...snapshot, concept_references: [{ ...conceptReference, evidence_ids: ["e-contract"] }], concept_reference_issues: [] };
+  for (const payload of [
+    { ...mapped, concept_references: [{ ...conceptReference, node_id: "other" }] },
+    { ...mapped, concept_references: [{ ...conceptReference, status: "accepted" }] },
+    { ...mapped, concept_references: [{ ...conceptReference, review_status: "reviewed" }] },
+    { ...mapped, concept_references: [{ ...conceptReference, evidence_ids: [42] }] },
+    { ...mapped, concept_references: [{ ...conceptReference, class_uri: {} }] },
+    { ...mapped, concept_reference_issues: [{ node_id: "other", class_uri: conceptReference.class_uri, reason: "Missing node." }] },
+    { ...mapped, concept_reference_issues: null },
+  ]) {
+    globalThis.fetch = async () => response(payload);
+    await assert.rejects(loadInstanceTypes("rule-1"));
+  }
+  globalThis.fetch = async () => response(snapshot);
+  assert.equal((await loadInstanceTypes("rule-1")).node_id, "rule-1");
+  globalThis.fetch = async () => response(mapped);
+  assert.equal((await loadInstanceTypes("rule-1")).node_id, "rule-1");
+});

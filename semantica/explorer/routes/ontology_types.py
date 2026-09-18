@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from ..dependencies import get_session
 from ..session import GraphSession
 from .ontology_evidence import _related_rules
+from .ontology_references import _concept_references
 
 router = APIRouter(prefix="/api/ontology", tags=["ontology"])
 _RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -213,13 +214,31 @@ def instance_types(
             raise HTTPException(404, "Instance node not found.")
         types = _memberships(session.graph, node)
         concepts, related_status = _related_concepts(request, session, node_id)
+        references = _concept_references(request, session, node_id=node_id)
         return {
             "node_id": node_id,
             "status": "declared" if types else "unmapped",
             "types": types,
             "related_concepts": concepts,
             "related_status": related_status,
+            "concept_references": references["references"],
+            "concept_reference_issues": references["issues"],
             "notice": NOTICE,
+        }
+
+
+@router.get("/concept-references")
+def concept_references(
+    request: Request,
+    class_uri: str = Query(..., min_length=1),
+    session: GraphSession = Depends(get_session),
+) -> dict:
+    if _iri(class_uri) != class_uri:
+        raise HTTPException(400, "class_uri must be an absolute class IRI.")
+    with session.graph._lock:
+        return {
+            "class_uri": class_uri,
+            **_concept_references(request, session, class_uri=class_uri),
         }
 
 

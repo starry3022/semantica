@@ -557,7 +557,7 @@ function CreateNewPanel({ onLoaded }: { onLoaded: () => void }) {
               ...(createMode === m ? modeTabActive : modeTabIdle),
             }}
           >
-            {m === "scratch" ? "From Scratch" : m === "data" ? "From Data" : "From Text"}
+            {m === "scratch" ? "From Scratch" : m === "data" ? "From RDF" : "From Text"}
           </button>
         ))}
       </div>
@@ -579,11 +579,11 @@ function CreateNewPanel({ onLoaded }: { onLoaded: () => void }) {
       </FieldGroup>
 
       {createMode === "data" && (
-        <FieldGroup label="Sample Data (JSON or CSV)">
+        <FieldGroup label="Turtle RDF (LLM)">
           <Textarea
             value={sampleData}
             onChange={setSampleData}
-            placeholder={'[{"name": "Alice", "age": 30, "city": "Berlin"}]'}
+            placeholder={'@prefix ex: <https://example.org/process/> .\nex:document a ex:RequiredDocument ;\n  ex:name "合法有效的合同" .'}
             rows={6}
           />
         </FieldGroup>
@@ -603,7 +603,7 @@ function CreateNewPanel({ onLoaded }: { onLoaded: () => void }) {
       {createState === "success" && (
         <div style={successBoxStyle}>
           <CheckCircle2 size={13} />
-          <span>Ontology created and opened in the Registry</span>
+          <span>{createMode === "scratch" ? "Ontology created and opened in the Registry" : "Candidate ontology created · unreviewed"}</span>
         </div>
       )}
 

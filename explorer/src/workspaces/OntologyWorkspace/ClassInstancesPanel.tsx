@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { describeTypeBasis, loadClassInstances, type ClassInstancesSnapshot } from "../GraphWorkspace/instanceTypes";
+import { describeTypeBasis, loadClassInstances, loadConceptReferences, type ClassInstancesSnapshot, type ConceptReferencesSnapshot } from "../GraphWorkspace/instanceTypes";
 
 interface ClassInstancesPanelProps {
   classUri: string;
@@ -18,6 +18,51 @@ function ClassInstancesSession({ classUri, onJumpToGraphNode }: ClassInstancesPa
     {expanded ? <>
       <p style={noteStyle}>Evidence associations are not instance declarations. This list shows explicit types only.</p>
       <ClassInstancesPage key={skip} classUri={classUri} skip={skip} onPageChange={setSkip} onJumpToGraphNode={onJumpToGraphNode} />
+    </> : null}
+    <ConceptReferences classUri={classUri} onJumpToGraphNode={onJumpToGraphNode} />
+  </section>;
+}
+
+function ConceptReferences({ classUri, onJumpToGraphNode }: ClassInstancesPanelProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [snapshot, setSnapshot] = useState<ConceptReferencesSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void loadConceptReferences(classUri, controller.signal).then(
+      (value) => { if (active) setSnapshot(value); },
+      (cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Unable to load concept references."); },
+    );
+    return () => { active = false; controller.abort(); };
+  }, [classUri]);
+
+  const unavailable = error || snapshot?.status === "unavailable" || (snapshot?.issues.length && !snapshot.references.length);
+  const suffix = unavailable ? "unavailable" : snapshot?.status === "unconfigured" ? "not configured" : snapshot ? String(snapshot.references.length) : "loading…";
+  return <section aria-label="Concept references" style={{ marginTop: 12 }}>
+    <button type="button" aria-expanded={expanded} style={headingButtonStyle} onClick={() => setExpanded((value) => !value)}>Concept references ({suffix})</button>
+    {expanded ? <>
+      {error ? <p role="alert" style={noteStyle}>{error}</p>
+        : !snapshot ? <p role="status" style={noteStyle}>Loading concept references…</p>
+          : <>
+            <p style={noteStyle}>Candidate concept references are not instance declarations or business approval.</p>
+            {snapshot.notice ? <p style={noteStyle}>{snapshot.notice}</p> : null}
+            {snapshot.issues.map((issue, index) => <p role="alert" style={noteStyle} key={`${issue.node_id}:${index}`}>{issue.reason}</p>)}
+            {snapshot.status === "ready" && !snapshot.references.length && !snapshot.issues.length ? <p style={noteStyle}>No explicit concept references in the current graph.</p> : null}
+            {snapshot.references.length ? <ul style={listStyle}>
+              {snapshot.references.map((reference) => <li key={reference.node_id} style={itemStyle}>
+                <strong>{reference.label}</strong>
+                <p style={noteStyle}>candidate / unreviewed</p>
+                <details>
+                  <summary style={{ ...noteStyle, cursor: "pointer" }}>Mapping details</summary>
+                  <code style={idStyle}>{reference.node_id}</code>
+                  <p style={noteStyle}>{reference.rationale}</p>
+                  <p style={noteStyle}>{reference.evidence_ids.length} evidence reference{reference.evidence_ids.length === 1 ? "" : "s"}</p>
+                </details>
+                <button type="button" aria-label={`Open referenced node ${reference.label}`} style={buttonStyle} disabled={!onJumpToGraphNode} onClick={() => onJumpToGraphNode?.(reference.node_id)}>Open referenced node</button>
+              </li>)}
+            </ul> : null}
+          </>}
     </> : null}
   </section>;
 }

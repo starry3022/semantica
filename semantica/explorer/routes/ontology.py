@@ -225,6 +225,7 @@ class CreateOntologyRequest(BaseModel):
     description: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     sample_data: Optional[str] = None
+    source_text: Optional[str] = None
     schema_text: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
@@ -1660,168 +1661,145 @@ async def create_ontology(
     body: CreateOntologyRequest,
     session: GraphSession = Depends(get_session),
 ):
-    """Create ontology from scratch, sample data, or text using OntologyEngine."""
+    """Create a draft ontology from scratch, inline Turtle, or schema text."""
     ns = body.namespace.rstrip("/#")
     onto_uri = f"{ns}#ontology"
-    
-    # Initialize OntologyEngine with session's graph store
-    engine_config = {"store": session.graph.store if hasattr(session.graph, "store") else None}
-    if body.provider or body.model:
-        engine_config["provider"] = body.provider
-        engine_config["model"] = body.model
-    
-    nodes: List[Dict[str, Any]] = [{
-        "id": onto_uri,
-        "type": "owl:Ontology",
-        "content": body.name,
-        "properties": {
-            "rdfs:label": body.name,
-            "rdfs:comment": body.description or "",
-            "namespace": body.namespace,
-        },
-    }]
+    generated = body.mode != "scratch"
+    nodes: List[Dict[str, Any]] = [
+        {
+            "id": onto_uri,
+            "type": "owl:Ontology",
+            "content": body.name,
+            "properties": {
+                "rdfs:label": body.name,
+                "rdfs:comment": body.description or "",
+                "namespace": body.namespace,
+            },
+        }
+    ]
     edges: List[Dict[str, Any]] = []
 
-    if body.mode == "data" and body.sample_data:
+    if generated:
+        from ...utils.exceptions import ValidationError
+
+        content = body.sample_data if body.mode == "data" else body.schema_text
+        if not content or not content.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Turtle RDF is required for data mode."
+                    if body.mode == "data"
+                    else "Schema text is required for text mode."
+                ),
+            )
         try:
             from ...ontology import OntologyEngine
-            engine = OntologyEngine(**engine_config)
-            result = await asyncio.to_thread(engine.from_data, body.sample_data)
-            
-            # Convert OntologyEngine result to graph nodes/edges
-            if isinstance(result, dict):
-                for cls in result.get("classes", []):
-                    cls_uri = f"{ns}/{cls.get('name', uuid.uuid4().hex[:6])}"
-                    nodes.append({
-                        "id": cls_uri,
-                        "type": "owl:Class",
-                        "content": cls.get("name", ""),
-                        "properties": {
-                            "rdfs:label": cls.get("name", ""),
-                            "rdfs:comment": cls.get("description", ""),
-                        },
-                    })
-                
-                # Add property edges
-                for prop in result.get("properties", []):
-                    prop_uri = f"{ns}/{prop.get('name', uuid.uuid4().hex[:6])}"
-                    
-                    nodes.append({
-                        "id": prop_uri,
-                        "type": "owl:ObjectProperty",
-                        "content": prop.get("name", ""),
-                        "properties": {"rdfs:label": prop.get("name", "")},
-                    })
-                    
-                    # Only create domain/range edges if domain/range are specified
-                    domain = prop.get('domain')
-                    if domain and domain.strip():
-                        domain_uri = f"{ns}/{domain}"
-                        edges.append({
-                            "source": prop_uri,
-                            "target": domain_uri,
-                            "type": "rdfs:domain",
-                            "weight": 1.0,
-                        })
-                    
-                    range_val = prop.get('range')
-                    if range_val and range_val.strip():
-                        range_uri = f"{ns}/{range_val}"
-                        edges.append({
-                            "source": prop_uri,
-                            "target": range_uri,
-                            "type": "rdfs:range",
-                            "weight": 1.0,
-                        })
-                
-                # Add subclass edges
-                for cls in result.get("classes", []):
-                    cls_uri = f"{ns}/{cls.get('name', '')}"
-                    for parent in cls.get("superclasses", []):
-                        parent_uri = f"{ns}/{parent}"
-                        edges.append({
-                            "source": cls_uri,
-                            "target": parent_uri,
-                            "type": "rdfs:subClassOf",
-                            "weight": 1.0,
-                        })
-            
-            logger.info(f"Generated ontology from sample data with {len(nodes)} nodes, {len(edges)} edges")
-            
-        except Exception as exc:
-            logger.exception("Failed to generate ontology from sample data; aborting ontology creation.")
-            raise HTTPException(status_code=500, detail=f"Ontology generation failed: {exc}") from exc
 
-    elif body.mode == "text" and body.schema_text:
-        try:
-            from ...ontology import OntologyEngine
-            engine = OntologyEngine(**engine_config)
-            result = await asyncio.to_thread(engine.from_text, body.schema_text, provider=body.provider, model=body.model)
-            
-            # Convert OntologyEngine result to graph nodes/edges
-            if isinstance(result, dict):
-                for cls in result.get("classes", []):
-                    cls_uri = f"{ns}/{cls.get('name', uuid.uuid4().hex[:6])}"
-                    nodes.append({
-                        "id": cls_uri,
-                        "type": "owl:Class",
-                        "content": cls.get("name", ""),
-                        "properties": {
-                            "rdfs:label": cls.get("name", ""),
-                            "rdfs:comment": cls.get("description", ""),
-                        },
-                    })
-                
-                # Add property edges
-                for prop in result.get("properties", []):
-                    prop_uri = f"{ns}/{prop.get('name', uuid.uuid4().hex[:6])}"
-                    
-                    nodes.append({
-                        "id": prop_uri,
-                        "type": "owl:ObjectProperty",
-                        "content": prop.get("name", ""),
-                        "properties": {"rdfs:label": prop.get("name", "")},
-                    })
-                    
-                    # Only create domain/range edges if domain/range are specified
-                    domain = prop.get('domain')
-                    if domain and domain.strip():
-                        domain_uri = f"{ns}/{domain}"
-                        edges.append({
-                            "source": prop_uri,
-                            "target": domain_uri,
-                            "type": "rdfs:domain",
-                            "weight": 1.0,
-                        })
-                    
-                    range_val = prop.get('range')
-                    if range_val and range_val.strip():
-                        range_uri = f"{ns}/{range_val}"
-                        edges.append({
-                            "source": prop_uri,
-                            "target": range_uri,
-                            "type": "rdfs:range",
-                            "weight": 1.0,
-                        })
-                
-                # Add subclass edges
-                for cls in result.get("classes", []):
-                    cls_uri = f"{ns}/{cls.get('name', '')}"
-                    for parent in cls.get("superclasses", []):
-                        parent_uri = f"{ns}/{parent}"
-                        edges.append({
-                            "source": cls_uri,
-                            "target": parent_uri,
-                            "type": "rdfs:subClassOf",
-                            "weight": 1.0,
-                        })
-            
-            logger.info(f"Generated ontology from text with {len(nodes)} nodes, {len(edges)} edges")
-            
-        except Exception as exc:
-            logger.exception("Failed to generate ontology from schema text; aborting ontology creation.")
-            raise HTTPException(status_code=500, detail=f"Ontology generation failed: {exc}") from exc
+            engine = OntologyEngine(
+                **{
+                    key: value
+                    for key, value in {
+                        "provider": body.provider,
+                        "model": body.model,
+                    }.items()
+                    if value
+                }
+            )
+            options = {
+                "name": body.name,
+                "base_uri": body.namespace,
+                "provider": body.provider,
+                "model": body.model,
+            }
+            if body.mode == "data":
+                result = await asyncio.to_thread(
+                    engine.from_rdf,
+                    content,
+                    source_text=body.source_text or "",
+                    rdf_format="turtle",
+                    **options,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    engine.from_text,
+                    content,
+                    **options,
+                )
 
+            if not isinstance(result, dict) or not isinstance(result.get("uri"), str):
+                raise ValidationError("Generated ontology needs an IRI")
+            classes, properties = result.get("classes"), result.get("properties")
+            if (
+                not result["uri"].strip()
+                or not isinstance(classes, list)
+                or not classes
+                or not isinstance(properties, list)
+                or any(
+                    not isinstance(term, dict)
+                    or not isinstance(term.get("uri"), str)
+                    or not term["uri"].strip()
+                    for term in [*classes, *properties]
+                )
+            ):
+                raise ValidationError("Generated ontology has invalid terms")
+
+            # Adapt the native DTO to the shared ingestion converter. Its IRIs,
+            # localized labels and property kinds must remain authoritative.
+            ontology = {
+                **result,
+                "name": body.name,
+                "description": body.description or "",
+                "classes": [
+                    {
+                        **cls,
+                        "description": cls.get("comment") or cls.get("description", ""),
+                        "parents": _as_uri_list(
+                            cls.get("subClassOf") or cls.get("parents")
+                        ),
+                    }
+                    for cls in result.get("classes", [])
+                ],
+                "properties": [
+                    {
+                        **prop,
+                        "description": prop.get("comment")
+                        or prop.get("description", ""),
+                    }
+                    for prop in result.get("properties", [])
+                ],
+            }
+            nodes, edges = _convert_ontology_to_graph(ontology)
+            onto_uri = ontology["uri"]
+            for item in [*nodes, *edges]:
+                item.setdefault("properties", {}).update(
+                    fact_status="candidate",
+                    review_status="unreviewed",
+                )
+        except ValidationError as exc:
+            logger.warning("Ontology generation validation failed; creation aborted.")
+            raise HTTPException(
+                status_code=422,
+                detail="Ontology generation input or output is invalid.",
+            ) from exc
+        except Exception as exc:
+            logger.error("Ontology generation failed; creation aborted.")
+            raise HTTPException(
+                status_code=500, detail="Ontology generation failed."
+            ) from exc
+
+    entry = OntologyEntry(
+        uri=onto_uri,
+        name=body.name,
+        description=body.description,
+        format="turtle",
+        status="draft",
+        version=None if generated else "0.1.0",
+        class_count=sum(1 for n in nodes if n.get("type") == "owl:Class"),
+        property_count=sum(1 for n in nodes if n.get("type") in _PROPERTY_TYPES),
+        loaded_at=datetime.now(UTC).isoformat(),
+        enabled=True,
+        tags=body.tags,
+    )
     try:
         nodes_added, edges_added = await asyncio.to_thread(
             session.add_nodes_and_edges, nodes, edges
@@ -1829,23 +1807,13 @@ async def create_ontology(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    registry = _get_registry(request)
-    registry[onto_uri] = OntologyEntry(
+    _get_registry(request)[onto_uri] = entry
+    return LoadOntologyResponse(
         uri=onto_uri,
         name=body.name,
-        description=body.description,
+        nodes_added=nodes_added,
+        edges_added=edges_added,
         format="turtle",
-        status="draft",
-        version="0.1.0",
-        class_count=sum(1 for n in nodes if n.get("type") == "owl:Class"),
-        loaded_at=datetime.now(UTC).isoformat(),
-        enabled=True,
-        tags=body.tags,
-    )
-
-    return LoadOntologyResponse(
-        uri=onto_uri, name=body.name,
-        nodes_added=nodes_added, edges_added=edges_added, format="turtle",
     )
 
 

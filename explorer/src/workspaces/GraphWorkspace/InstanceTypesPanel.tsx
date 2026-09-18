@@ -14,6 +14,8 @@ export interface InstanceTypesPanelProps {
 
 export function InstanceTypesPanel({ nodeId, snapshot, loading, error, showTypes, onShowTypes, onOpenOntologyEntity }: InstanceTypesPanelProps) {
   const current = !loading && !error && snapshot?.node_id === nodeId ? snapshot : null;
+  const references = current?.concept_references ?? [];
+  const referenceIssues = current?.concept_reference_issues ?? [];
   return (
     <section aria-label="Instance classes" style={panelStyle}>
       <section aria-label="Declared class">
@@ -40,6 +42,25 @@ export function InstanceTypesPanel({ nodeId, snapshot, loading, error, showTypes
           Show class links
         </label>
       </section>
+      {references.length > 0 || referenceIssues.length > 0 ? <section aria-label="Business concept references" style={{ borderTop: `1px solid ${GRAPH_THEME.ui.surface.divider}`, paddingTop: 10, marginTop: 10 }}>
+        <h4 style={headingStyle}>Business concept{references.length > 1 ? "s" : ""}</h4>
+        <ul style={listStyle}>
+          {references.map((reference) => <li key={reference.class_uri} style={itemStyle}>
+            <button type="button" aria-label={`Open concept ${reference.class_label}`} title={reference.class_uri} style={buttonStyle} disabled={!onOpenOntologyEntity} onClick={() => onOpenOntologyEntity?.(reference.class_uri)}><span>{reference.class_label}</span> <span aria-hidden="true">↗</span></button>
+            <span style={{ ...noteStyle, marginLeft: 8 }}>candidate / unreviewed</span>
+          </li>)}
+        </ul>
+        {references.length > 0 ? <details key={`${nodeId}:concept-references`} style={{ marginTop: 4 }}>
+          <summary style={summaryStyle}>Mapping details</summary>
+          <p style={noteStyle}>Concept references are not instance declarations or business approval.</p>
+          {references.map((reference) => <div key={reference.class_uri}>
+            <code style={uriStyle}>{reference.class_uri}</code>
+            <p style={noteStyle}>{reference.rationale}</p>
+            <p style={noteStyle}>{reference.evidence_ids.length} evidence reference{reference.evidence_ids.length === 1 ? "" : "s"}</p>
+          </div>)}
+        </details> : null}
+        {referenceIssues.map((issue, index) => <p key={`${issue.class_uri}:${index}`} role="alert" style={noteStyle}>{issue.reason}</p>)}
+      </section> : null}
       {current ? <section aria-label="Related business concepts via evidence" style={{ borderTop: `1px solid ${GRAPH_THEME.ui.surface.divider}`, paddingTop: 10, marginTop: 10 }}>
         <details key={nodeId}>
           <summary style={summaryStyle}>Related concepts ({current.related_concepts.length})</summary>

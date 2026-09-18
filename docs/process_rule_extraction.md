@@ -58,8 +58,8 @@ interpretation is correct.
 rules, roles, conditions, approval groups, document requirements, deadlines,
 evidence quotations and clause assessments. There are no separate NER or
 relation-extraction model calls in this path. The separate business-ontology
-command below makes its own explicit LLM call; it reuses the original text and
-does not regenerate or rewrite the rules.
+command below makes its own explicit LLM call from base RDF and original source
+context. It does not regenerate or rewrite the rules.
 
 | Stage | LLM call | Output token limit |
 |---|---|---|
@@ -67,7 +67,7 @@ does not regenerate or rewrite the rules.
 | Typed process-rule extraction and clause assessment | Yes | Caller-supplied `max_tokens`; the example above uses 16384 |
 | Schema validation, exact evidence alignment and coverage consistency | No | Not applicable |
 | Graph projection and instance RDF export | No | Not applicable |
-| Business ontology proposal with `LLMOntologyGenerator` | Yes, when explicitly requested | Caller-supplied `max_tokens` |
+| Business ontology proposal from RDF with `OntologyEngine.from_rdf` | Yes, when explicitly requested | Caller-supplied `max_tokens` |
 | Fixed process/evidence vocabulary and RDF/OWL serialization | No | Not applicable |
 | SHACL generation and validation | No | Not applicable |
 | Offline replay and Explorer display | No | Not applicable |
@@ -398,6 +398,71 @@ separate **Source material & evidence** entry for validated source alignment.
 
 ## LLM business ontology and technical RDF fields
 
+The native `OntologyEngine.from_rdf` entry point proposes a business ontology
+with the configured LLM from the complete base RDF. `from_data` dispatches RDF
+strings/bytes and `rdflib.Graph` inputs to this path. Dictionary inputs retain
+the existing deterministic inference API; they are not silently sent to a model.
+The model proposes classes, properties, RDF subject evidence and explicit
+`references_concept` links. Code validates the proposal and serializes it; it
+never assigns a material requirement `rdf:type Contract` or rewrites input RDF.
+
+```bash
+python examples/ontology_from_rdf.py \
+  --rdf /path/to/artifacts/instances.ttl \
+  --graph /path/to/artifacts/candidate-graph.json \
+  --source /path/to/artifacts/source.txt \
+  --source-id maintenance-policy-v3 \
+  --config /private/llm-config.json \
+  --max-tokens 20000 \
+  --base-uri https://example.org/procurement-business/ \
+  --output /path/to/new-rdf-ontology
+```
+
+The candidate graph must export exactly the same canonical RDF before a model
+request is made. Its declared namespace supplies the process vocabulary default;
+a conflicting `--process-base-uri` is rejected. The output includes the original
+source, canonical `input.ttl`, ontology JSON/Turtle/XML, fixed support vocabulary,
+`concept-references.json`, prompt, validation and provenance summaries. With
+`--source-id` it exports source evidence context; with `--graph` it also binds
+concept references to the exact candidate graph. The graph argument requires a
+source identity. No absolute sample paths are built into the implementation.
+
+Replace `--config ... --max-tokens ...` with
+`--replay /saved/ontology.json` for an offline export. Keep `prompt.txt` beside
+that saved ontology. Replay checks the canonical input RDF, original source and
+prompt hashes, and validates all references and coverage again. Invalid output
+is rejected before atomic artifact publication. An explicit `draft_ontology` /
+`review_feedback` call can request a revised proposal, with a separately recorded
+prompt; the implementation does not invent missing mappings or silently fall
+back to heuristic inference when the model fails.
+
+Every semantic input subject must occur in `concept_references` or in
+`unmapped_nodes` with a reason. Technical evidence/source subjects cannot be
+mapped to business classes. Each proposed term lists existing `evidence_nodes`;
+when original text is supplied it also selects exactly two inclusive 1-based
+`evidence_lines`. Code copies the exact Unicode source quote. This checks
+structure and provenance, not model completeness or business correctness.
+
+In Explorer, **Business concept** shows a visible candidate link alongside
+**Declared class**. In Hub, **Concept references** opens the corresponding
+requirements/rules; **Declared instances** remains restricted to explicit types.
+Both use in-app navigation. The original input node/relationship/namespace
+snapshot and live source evidence must still match. Editing an original semantic
+node invalidates the proposal until it is regenerated; unrelated ontology
+loading and canvas layout do not. Generic shared-citation **Related concepts**
+remain distinct from explicit model references. All links stay candidate /
+unreviewed; original RDF membership declarations remain unchanged.
+
+The native API accepts inline Turtle/N-Triples and in-memory graphs, never a URL
+or filesystem path. It rejects inputs above 2 MB, 10,000 triples or 128 blank
+nodes instead of truncating them. The Hub **Create New → From RDF** entry uses
+this native LLM path and preserves generated IRIs, source-language labels,
+property kinds and class hierarchy. It creates a draft schema; use the CLI bundle
+and explicit evidence-context registration for the process graph/source-bound
+navigation described above. No mapping is guessed from display labels.
+
+Text-only proposals are also available when no base RDF exists:
+
 Generate a separate candidate business ontology with the configured model:
 
 ```bash
@@ -542,7 +607,12 @@ Business navigation and source evidence checks:
 python -m pytest -q \
   tests/ontology/test_evidence_context.py \
   tests/ontology/test_ontology_from_text.py \
-  tests/explorer/test_ontology_rule_links.py
+  tests/ontology/test_llm_rdf_generator.py \
+  tests/ontology/test_ontology_from_rdf.py \
+  tests/explorer/test_ontology_rule_links.py \
+  tests/explorer/test_concept_references.py \
+  tests/explorer/test_ontology_llm_creation.py \
+  tests/explorer/test_search_index.py
 cd explorer
 npm run test:ontology-evidence
 npm run test:ontology-terms
@@ -553,3 +623,7 @@ npm run build
 These regressions cover source and term isolation, changed snapshots, invalid
 citations, direct/property links, Unicode ranges, legacy defaults, primary/support
 selection, late responses, concept-switch cleanup and literal HTML display.
+The RDF tests also enforce complete mapped/unmapped subject coverage, canonical
+RDF identity, graph/source isolation, stale-reference rejection and preservation
+of explicit type declarations. Search regressions ensure an exact class label
+does not suppress requirements whose labels contain that text.

@@ -12,6 +12,32 @@ export interface DeclaredInstanceType {
   basis: InstanceTypeBasis[];
 }
 
+export interface ConceptReference {
+  node_id: string;
+  label: string;
+  class_uri: string;
+  class_label: string;
+  ontology_uri: string | null;
+  rationale: string;
+  status: "candidate";
+  review_status: "unreviewed";
+  evidence_ids: string[];
+}
+
+export interface ConceptReferenceIssue {
+  node_id: string;
+  class_uri: string;
+  reason: string;
+}
+
+export interface ConceptReferencesSnapshot {
+  class_uri: string;
+  references: ConceptReference[];
+  issues: ConceptReferenceIssue[];
+  status: "ready" | "unconfigured" | "unavailable";
+  notice: string;
+}
+
 export interface InstanceTypesSnapshot {
   node_id: string;
   status: "declared" | "unmapped";
@@ -24,6 +50,8 @@ export interface InstanceTypesSnapshot {
   }[];
   related_status: "ready" | "unconfigured" | "unavailable";
   notice: string;
+  concept_references?: ConceptReference[];
+  concept_reference_issues?: ConceptReferenceIssue[];
 }
 
 export interface ClassInstancesSnapshot {
@@ -49,6 +77,20 @@ function isBasis(value: unknown): value is InstanceTypeBasis[] {
     && (basis.edge_id === undefined || typeof basis.edge_id === "string"));
 }
 
+function isConceptReference(value: unknown): value is ConceptReference {
+  return isRecord(value)
+    && typeof value.node_id === "string" && typeof value.label === "string"
+    && typeof value.class_uri === "string" && typeof value.class_label === "string"
+    && isNullableString(value.ontology_uri) && typeof value.rationale === "string"
+    && value.status === "candidate" && value.review_status === "unreviewed"
+    && Array.isArray(value.evidence_ids) && value.evidence_ids.every((id: unknown) => typeof id === "string");
+}
+
+function isConceptReferenceIssue(value: unknown): value is ConceptReferenceIssue {
+  return isRecord(value) && typeof value.node_id === "string"
+    && typeof value.class_uri === "string" && typeof value.reason === "string";
+}
+
 function isInstanceTypes(value: unknown): value is InstanceTypesSnapshot {
   if (!isRecord(value)) return false;
   return typeof value.node_id === "string"
@@ -64,7 +106,11 @@ function isInstanceTypes(value: unknown): value is InstanceTypesSnapshot {
       && isNullableString(concept.ontology_uri)
       && Array.isArray(concept.evidence_ids) && concept.evidence_ids.every((id: unknown) => typeof id === "string"))
     && typeof value.related_status === "string" && ["ready", "unconfigured", "unavailable"].includes(value.related_status)
-    && typeof value.notice === "string";
+    && typeof value.notice === "string"
+    && (value.concept_references === undefined || (Array.isArray(value.concept_references)
+      && value.concept_references.every((reference: unknown) => isConceptReference(reference) && reference.node_id === value.node_id)))
+    && (value.concept_reference_issues === undefined || (Array.isArray(value.concept_reference_issues)
+      && value.concept_reference_issues.every((issue: unknown) => isConceptReferenceIssue(issue) && issue.node_id === value.node_id)));
 }
 
 export async function loadInstanceTypes(nodeId: string, signal?: AbortSignal): Promise<InstanceTypesSnapshot> {
@@ -89,6 +135,24 @@ export async function loadClassInstances(classUri: string, skip: number, limit: 
     throw new Error("The declared-instance response does not match the selected class or page.");
   }
   return value as unknown as ClassInstancesSnapshot;
+}
+
+export async function loadConceptReferences(classUri: string, signal?: AbortSignal): Promise<ConceptReferencesSnapshot> {
+  const query = new URLSearchParams({ class_uri: classUri });
+  const response = await fetch(`/api/ontology/concept-references?${query}`, { signal });
+  if (!response.ok) throw new Error(`Unable to load concept references (${response.status}).`);
+  const value: unknown = await response.json();
+  if (!isRecord(value) || value.class_uri !== classUri
+    || typeof value.status !== "string" || !["ready", "unconfigured", "unavailable"].includes(value.status)
+    || typeof value.notice !== "string"
+    || !Array.isArray(value.references)
+    || (value.status !== "ready" && value.references.length > 0)
+    || !value.references.every((reference: unknown) => isConceptReference(reference) && reference.class_uri === classUri)
+    || !Array.isArray(value.issues)
+    || !value.issues.every((issue: unknown) => isConceptReferenceIssue(issue) && issue.class_uri === classUri)) {
+    throw new Error("The concept-reference response does not match the selected class.");
+  }
+  return value as unknown as ConceptReferencesSnapshot;
 }
 
 export function describeTypeBasis(basis: InstanceTypeBasis): string {

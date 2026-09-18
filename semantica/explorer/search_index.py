@@ -228,11 +228,11 @@ class GraphSearchIndex:
         if prefix_sets:
             candidate_ids.update(set().union(*prefix_sets))
 
-        diagnostics["path"] = "index"
-
-        if not candidate_ids:
-            diagnostics["path"] = "secondary_scan"
-            candidate_ids = self._secondary_scan(normalized_query, limit)
+        diagnostics["path"] = (
+            "index_and_secondary_scan" if candidate_ids else "secondary_scan"
+        )
+        # Exact or token hits must not hide longer labels containing the query.
+        candidate_ids.update(self._secondary_scan(normalized_query, limit))
 
         diagnostics["candidates"] = len(candidate_ids)
 

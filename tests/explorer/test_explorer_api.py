@@ -605,14 +605,14 @@ class TestOntologyCreateFailures:
         def _boom(self, *_args, **_kwargs):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(OntologyEngine, "from_data", _boom)
+        monkeypatch.setattr(OntologyEngine, "from_rdf", _boom)
         response = client.post(
             "/api/ontology/create",
             json={
                 "mode": "data",
                 "namespace": "http://example.org/create-failure-data",
                 "name": "Create Failure (data)",
-                "sample_data": "id,name\n1,Alice\n2,Bob",
+                "sample_data": '<https://example.org/alice> <https://example.org/name> "Alice" .',
             },
         )
         assert response.status_code == 500

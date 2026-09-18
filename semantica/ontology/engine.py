@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from ..utils.exceptions import ProcessingError
+from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
 from .ontology_generator import OntologyGenerator
@@ -36,7 +36,17 @@ class OntologyEngine:
         from ..change_management.ontology_version_manager import VersionManager
         self.version_manager = config.get("version_manager") or VersionManager(**config)
 
-    def from_data(self, data: Dict[str, Any], **options) -> Dict[str, Any]:
+    def from_data(self, data: Any, **options) -> Dict[str, Any]:
+        """Use LLM proposals for RDF; retain entity/relationship dict heuristics."""
+        method = options.pop("method", None)
+        if not isinstance(data, dict):
+            if method not in (None, "llm"):
+                raise ValidationError("RDF ontology generation requires method='llm'")
+            return self.from_rdf(data, **options)
+        if method not in (None, "heuristic"):
+            raise ValidationError(
+                "Dictionary ontology generation requires method='heuristic'"
+            )
         tracking_id = self.progress.start_tracking(
             module="ontology",
             submodule="OntologyEngine",
@@ -49,6 +59,27 @@ class OntologyEngine:
         except Exception as e:
             self.progress.update_tracking(tracking_id, message="Generation failed")
             raise
+
+    def from_rdf(
+        self,
+        rdf_data,
+        *,
+        source_text: str = "",
+        rdf_format: str = "turtle",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        **options,
+    ) -> Dict[str, Any]:
+        """Generate an unreviewed LLM ontology proposal from inline RDF or a Graph."""
+        if options.pop("method", "llm") != "llm":
+            raise ValidationError("RDF ontology generation requires method='llm'")
+        if provider:
+            self.llm.set_provider(provider, model=model)
+        elif model is not None:
+            options["model"] = model
+        return self.llm.generate_ontology_from_rdf(
+            rdf_data, source_text=source_text, rdf_format=rdf_format, **options
+        )
 
     def from_text(self, text: str, provider: Optional[str] = None, model: Optional[str] = None, **options) -> Dict[str, Any]:
         if provider:

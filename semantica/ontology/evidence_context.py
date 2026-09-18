@@ -64,15 +64,77 @@ class TermEvidenceAnchor(BaseModel):
         return self
 
 
+class ConceptReference(BaseModel):
+    """An LLM proposal bound to an input node snapshot, never an rdf:type."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(min_length=1)
+    class_uri: str
+    relation: Literal["references_concept"]
+    rationale: str = Field(min_length=1)
+    node_type: Literal[
+        "ProcessRule",
+        "Role",
+        "Activity",
+        "ApprovalGroup",
+        "Condition",
+        "RequiredDocument",
+        "RelativeDeadline",
+    ]
+    node_label: str
+    node_properties: dict
+    input_rdf_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class InputGraphSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_ids: list[str] = Field(min_length=1, max_length=10000)
+    base_uri: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rdf_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class BusinessOntologyContext(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     uri: str
     terms: list[TermEvidenceAnchor] = Field(max_length=2000)
+    concept_references: list[ConceptReference] = Field(
+        default_factory=list, max_length=10000
+    )
+    input_graph: InputGraphSnapshot | None = None
 
     @field_validator("uri")
     @classmethod
     def valid_uri(cls, value):
         return _iri(value)
+
+    @model_validator(mode="after")
+    def valid_concept_references(self):
+        if self.concept_references and self.input_graph is None:
+            raise ValueError("RDF concept references require an input graph snapshot.")
+        if self.input_graph and len(set(self.input_graph.node_ids)) != len(
+            self.input_graph.node_ids
+        ):
+            raise ValueError("Input graph node identities must be unique.")
+        classes = {term.uri for term in self.terms if term.type == "owl:Class"}
+        seen = set()
+        for reference in self.concept_references:
+            key = (reference.node_id, reference.class_uri)
+            if reference.class_uri not in classes or key in seen:
+                raise ValueError(
+                    "Concept references need unique nodes/classes owned by this ontology."
+                )
+            if not reference.rationale.strip():
+                raise ValueError("A candidate concept reference needs a rationale.")
+            if (
+                reference.node_id not in self.input_graph.node_ids
+                or reference.input_rdf_sha256 != self.input_graph.rdf_sha256
+            ):
+                raise ValueError(
+                    "Concept reference differs from its input graph identity."
+                )
+            seen.add(key)
+        return self
 
 
 class OntologyEvidenceContext(BaseModel):
