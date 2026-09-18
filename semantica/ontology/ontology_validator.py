@@ -65,6 +65,8 @@ class SHACLValidationReport:
     warnings: List[SHACLViolation] = field(default_factory=list)
     infos: List[SHACLViolation] = field(default_factory=list)
     raw_report: Optional[str] = None
+    coverage: Dict[str, Any] = field(default_factory=dict)
+    technical_issues: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def violation_count(self) -> int:
@@ -76,7 +78,11 @@ class SHACLValidationReport:
 
     def summary(self) -> str:
         if self.conforms:
+            if self.technical_issues:
+                return "Graph conforms to SHACL constraints; see technical coverage notices."
             return "Graph conforms to all SHACL constraints."
+        if self.coverage.get("evaluation_complete") is False:
+            return f"Graph does NOT conform: {self.violation_count} violation(s); partial report."
         return f"Graph does NOT conform: {self.violation_count} violation(s)."
 
     def explain_violations(self) -> None:
@@ -142,7 +148,225 @@ class SHACLValidationReport:
             "violations": [v.to_dict() for v in self.violations],
             "warnings": [v.to_dict() for v in self.warnings],
             "infos": [v.to_dict() for v in self.infos],
+            "coverage": self.coverage,
+            "technical_issues": self.technical_issues,
         }
+
+
+def _shacl_coverage(data_graph: Any, shapes_graph: Any) -> Dict[str, Any]:
+    """Describe static Core targets and active constraints, not execution counts.
+
+    Target resolution follows pySHACL's inference='none' behavior, including
+    explicit target nodes absent from the data and transitive data subclasses.
+    Advanced targets are reported as unsupported instead of guessed.
+    """
+    from rdflib import Literal, Namespace, RDF, RDFS, URIRef
+
+    sh = Namespace("http://www.w3.org/ns/shacl#")
+    target_predicates = (
+        sh.targetClass,
+        sh.targetNode,
+        sh.targetSubjectsOf,
+        sh.targetObjectsOf,
+    )
+    candidates = set(shapes_graph.subjects(RDF.type, sh.NodeShape))
+    candidates.update(shapes_graph.subjects(RDF.type, sh.PropertyShape))
+    candidates.update(shapes_graph.subjects(sh.property, None))
+    for predicate in (*target_predicates, sh.target):
+        candidates.update(shapes_graph.subjects(predicate, None))
+    implicit_types = {RDFS.Class, *shapes_graph.subjects(RDFS.subClassOf, RDFS.Class)}
+    constraints = {
+        sh[name]
+        for name in (
+            "class",
+            "datatype",
+            "nodeKind",
+            "minCount",
+            "maxCount",
+            "minExclusive",
+            "minInclusive",
+            "maxExclusive",
+            "maxInclusive",
+            "minLength",
+            "maxLength",
+            "pattern",
+            "languageIn",
+            "uniqueLang",
+            "equals",
+            "disjoint",
+            "lessThan",
+            "lessThanOrEquals",
+            "not",
+            "and",
+            "or",
+            "xone",
+            "node",
+            "qualifiedMinCount",
+            "qualifiedMaxCount",
+            "closed",
+            "hasValue",
+            "in",
+            "sparql",
+        )
+    }
+    all_constraints = set()
+    paths = set()
+
+    def active_constraints(shape, visited):
+        if shape in visited or (shape, sh.deactivated, Literal(True)) in shapes_graph:
+            return set()
+        visited.add(shape)
+        found = set()
+        for predicate, value in shapes_graph.predicate_objects(shape):
+            if predicate == sh.path and isinstance(value, URIRef):
+                paths.add(value)
+            if predicate not in constraints:
+                continue
+            if predicate in (sh.closed, sh.uniqueLang) and value == Literal(False):
+                continue
+            if (
+                predicate in (sh.minCount, sh.minLength, sh.qualifiedMinCount)
+                and value.toPython() == 0
+            ):
+                continue
+            if predicate == sh.node:
+                nested = active_constraints(value, visited.copy())
+                if not nested:
+                    continue
+                found.update(nested)
+            found.add((shape, predicate, value))
+        for child in shapes_graph.objects(shape, sh.property):
+            found.update(active_constraints(child, visited))
+        return found
+
+    focus_nodes = set()
+    constrained_nodes = set()
+    targeted_classes = set()
+    unmatched_classes = set()
+    unsupported_targets: set[str] = set()
+    target_shape_count = 0
+    for shape in candidates:
+        if (shape, sh.deactivated, Literal(True)) in shapes_graph:
+            continue
+        classes = set(shapes_graph.objects(shape, sh.targetClass))
+        if implicit_types.intersection(shapes_graph.objects(shape, RDF.type)):
+            classes.add(shape)
+        if not classes and not any(
+            (shape, predicate, None) in shapes_graph
+            for predicate in (*target_predicates, sh.target)
+        ):
+            continue
+        target_shape_count += 1
+        unsupported_targets.update(
+            str(t) for t in shapes_graph.objects(shape, sh.target)
+        )
+        focus = set(shapes_graph.objects(shape, sh.targetNode))
+        for target_class in classes:
+            subclasses = set(
+                data_graph.transitive_subjects(RDFS.subClassOf, target_class)
+            )
+            subclasses.add(target_class)
+            targeted_classes.update(subclasses)
+            instances = {
+                node
+                for cls in subclasses
+                for node in data_graph.subjects(RDF.type, cls)
+            }
+            focus.update(instances)
+            if not instances:
+                unmatched_classes.add(str(target_class))
+        for predicate in shapes_graph.objects(shape, sh.targetSubjectsOf):
+            focus.update(data_graph.subjects(predicate, None))
+        for predicate in shapes_graph.objects(shape, sh.targetObjectsOf):
+            focus.update(data_graph.objects(None, predicate))
+        shape_constraints = active_constraints(shape, set())
+        all_constraints.update(shape_constraints)
+        focus_nodes.update(focus)
+        if shape_constraints:
+            constrained_nodes.update(focus)
+
+    data_classes = set(data_graph.objects(None, RDF.type))
+    data_predicates = set(data_graph.predicates()) - {RDF.type, RDFS.subClassOf}
+    return {
+        "data_triple_count": len(data_graph),
+        "target_shape_count": target_shape_count,
+        "constraint_count": len(all_constraints),
+        "focus_node_count": len(focus_nodes),
+        "constrained_focus_node_count": len(constrained_nodes),
+        "target_resolution_complete": not unsupported_targets,
+        "unmatched_target_classes": sorted(unmatched_classes),
+        "untargeted_data_classes": sorted(
+            str(c) for c in data_classes - targeted_classes
+        ),
+        "undeclared_predicates": sorted(str(p) for p in data_predicates - paths),
+        "unsupported_targets": sorted(unsupported_targets),
+    }
+
+
+def _shacl_coverage_issues(coverage: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Coverage notices stay separate from the SHACL result severities."""
+    issues = []
+    checks = (
+        (
+            not coverage["data_triple_count"],
+            "empty_data_graph",
+            "info",
+            "The data graph is empty; conformance does not establish coverage of any data.",
+        ),
+        (
+            not coverage["focus_node_count"],
+            "no_focus_nodes",
+            "warning",
+            "No focus nodes match the supported active SHACL targets.",
+        ),
+        (
+            not coverage["constraint_count"],
+            "no_effective_constraints",
+            "warning",
+            "No effective Core constraint declarations were found on the active target shapes.",
+        ),
+        (
+            coverage["focus_node_count"]
+            and not coverage["constrained_focus_node_count"],
+            "no_constrained_focus_nodes",
+            "warning",
+            "Resolved focus nodes have no effective constraint declarations; constraints on unmatched shapes do not cover them.",
+        ),
+        (
+            coverage["unmatched_target_classes"],
+            "unmatched_target_classes",
+            "info",
+            "Some SHACL target classes have no matching data nodes, including subclasses.",
+        ),
+        (
+            coverage["untargeted_data_classes"],
+            "untargeted_data_classes",
+            "info",
+            "Some RDF types have no matching SHACL class target; other target kinds may cover their nodes.",
+        ),
+        (
+            coverage["undeclared_predicates"],
+            "undeclared_predicates",
+            "info",
+            "Some data predicates have no declared simple SHACL property path; other constraints may cover them.",
+        ),
+        (
+            coverage["unsupported_targets"],
+            "unsupported_targets",
+            "warning",
+            "Advanced SHACL targets are unsupported by this validator; target coverage is incomplete.",
+        ),
+        (
+            not coverage["evaluation_complete"],
+            "validation_incomplete",
+            "warning",
+            "Validation used abort_on_first and stopped after nonconformance; the issue list may be incomplete.",
+        ),
+    )
+    for condition, code, severity, message in checks:
+        if condition:
+            issues.append({"code": code, "severity": severity, "message": message})
+    return issues
 
 
 def run_shacl_validation(
@@ -150,6 +374,8 @@ def run_shacl_validation(
     shacl_str: str,
     data_graph_format: str = "turtle",
     shacl_format: str = "turtle",
+    *,
+    abort_on_first: bool = False,
 ) -> SHACLValidationReport:
     """
     Run pySHACL validation and return a structured SHACLValidationReport.
@@ -160,6 +386,8 @@ def run_shacl_validation(
         data_graph_format: RDF format of data_graph_str (default "turtle").
         shacl_format: RDF format of shacl_str — "turtle", "json-ld", or "nt"
                       (default "turtle").
+        abort_on_first: Stop at the first failing shape; mark nonconforming
+                        reports incomplete when enabled.
 
     Raises ImportError if pyshacl or rdflib are not installed
     (install with: pip install semantica[shacl]).
@@ -190,13 +418,15 @@ def run_shacl_validation(
     }
     shacl_g = rdflib.Graph()
     shacl_g.parse(data=shacl_str, format=_fmt_map.get(shacl_format.lower().strip(), shacl_format))
+    coverage = _shacl_coverage(data_g, shacl_g)
 
     conforms, results_graph, results_text = pyshacl.validate(
         data_g,
         shacl_graph=shacl_g,
         inference="none",
-        abort_on_first=False,
+        abort_on_first=abort_on_first,
     )
+    coverage["evaluation_complete"] = not (abort_on_first and not conforms)
 
     violations: List[SHACLViolation] = []
     warnings: List[SHACLViolation] = []
@@ -270,6 +500,8 @@ def run_shacl_validation(
         warnings=warnings,
         infos=infos,
         raw_report=results_text,
+        coverage=coverage,
+        technical_issues=_shacl_coverage_issues(coverage),
     )
 
 
@@ -278,6 +510,8 @@ def _run_pyshacl(
     shacl_str: str,
     data_graph_format: str = "turtle",
     shacl_format: str = "turtle",
+    *,
+    abort_on_first: bool = False,
 ) -> SHACLValidationReport:
     """Backward-compatible alias for :func:`run_shacl_validation`."""
     return run_shacl_validation(
@@ -285,6 +519,7 @@ def _run_pyshacl(
         shacl_str,
         data_graph_format=data_graph_format,
         shacl_format=shacl_format,
+        abort_on_first=abort_on_first,
     )
 
 @dataclass

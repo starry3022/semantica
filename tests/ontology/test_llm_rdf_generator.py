@@ -303,7 +303,7 @@ def test_engine_rejects_mismatched_methods_instead_of_returning_empty_ontology()
     with pytest.raises(ValidationError):
         engine.from_data(RDF_TEXT, method="heuristic")
     with pytest.raises(ValidationError):
-        engine.from_data({"entities": [], "relationships": []}, method="llm")
+        engine.from_data({"entities": [], "relationships": []}, method="unknown")
 
 
 @pytest.mark.parametrize(

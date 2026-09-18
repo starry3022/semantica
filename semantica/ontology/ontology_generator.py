@@ -123,7 +123,11 @@ class OntologyGenerator:
 
     def generate_ontology(self, data: Dict[str, Any], **options) -> Dict[str, Any]:
         """
-        Generate ontology from data using 5-stage pipeline.
+        Generate an ontology draft from candidate entities and relationships.
+
+        ``method="llm"`` preserves the vocabulary IRIs emitted by RDFExporter
+        and asks the configured model for supported definitions and constraints.
+        The default ``heuristic`` method retains the existing staged pipeline.
 
         Executes the complete 5-stage ontology generation pipeline:
         1. Semantic Network Parsing: Extract domain concepts from entities/relationships
@@ -138,6 +142,7 @@ class OntologyGenerator:
                 - relationships: List of relationship dictionaries
                 - semantic_network: Optional pre-parsed semantic network
             **options: Generation options:
+                - method: "llm" or "heuristic" (default: configured method or heuristic)
                 - name: Ontology name (default: "GeneratedOntology")
                 - build_hierarchy: Whether to build class hierarchy (default: True)
                 - namespace_manager: Optional namespace manager instance
@@ -162,6 +167,37 @@ class OntologyGenerator:
             })
             ```
         """
+        method = options.pop("method", self.config.get("method", "heuristic"))
+        if method == "llm":
+            from .candidate_ontology import generate_candidate_ontology
+            from .llm_generator import LLMOntologyGenerator
+
+            inherited = self.config
+            if "provider" in options and options["provider"] != self.config.get("provider", "openai"):
+                # Provider credentials, endpoint and model belong to that provider.
+                inherited = {
+                    key: value for key, value in self.config.items()
+                    if key in {"name", "base_uri", "version", "review_feedback"}
+                }
+            generation_options = {**inherited, **options}
+            generation_options.pop("method", None)
+            if "max_completion_tokens" in options:
+                generation_options.pop("max_tokens", None)
+            elif "max_tokens" in options:
+                generation_options.pop("max_completion_tokens", None)
+            # Schema options do not configure a provider or its shared client pool.
+            provider_options = {
+                key: value for key, value in generation_options.items()
+                if key not in {
+                    "name", "base_uri", "version", "review_feedback",
+                    "min_occurrences", "namespace_manager", "build_hierarchy", "validate",
+                }
+            }
+            llm = LLMOntologyGenerator(**provider_options)
+            return generate_candidate_ontology(data, llm, **generation_options)
+        if method != "heuristic":
+            raise ValidationError("Ontology generation method must be 'llm' or 'heuristic'")
+
         tracking_id = self.progress_tracker.start_tracking(
             module="ontology",
             submodule="OntologyGenerator",
@@ -1082,6 +1118,11 @@ class SHACLGenerator:
         self, graph: SHACLGraph, properties: List[Dict[str, Any]]
     ) -> None:
         shape_by_class = {ns.target_class: ns for ns in graph.node_shapes}
+        shape_by_class.update(
+            (iri, shape_by_class[name])
+            for name, iri in graph.class_iris.items()
+            if name in shape_by_class
+        )
 
         for prop in properties:
             pname = prop.get("name")
@@ -1172,21 +1213,29 @@ class SHACLGenerator:
         self, graph: SHACLGraph, class_index: Dict[str, Dict[str, Any]]
     ) -> None:
         shape_by_class = {ns.target_class: ns for ns in graph.node_shapes}
+        shape_by_class.update(
+            (iri, shape_by_class[name])
+            for name, iri in graph.class_iris.items()
+            if name in shape_by_class
+        )
 
         for _ in range(20):  # max 20 passes; stops early when stable
             changed = False
             for node_shape in graph.node_shapes:
                 cls_data = class_index.get(node_shape.target_class, {})
-                parent_name = cls_data.get("parent") or cls_data.get("parent_class")
-                if not parent_name or parent_name not in shape_by_class:
-                    continue
-                parent_shape = shape_by_class[parent_name]
+                parents = []
+                for key in ("parent", "parent_class", "subClassOf"):
+                    value = cls_data.get(key)
+                    parents.extend(value if isinstance(value, list) else [value])
                 existing_paths = {ps.path for ps in node_shape.property_shapes}
-                for pps in parent_shape.property_shapes:
-                    if pps.path not in existing_paths:
-                        node_shape.property_shapes.append(dataclass_replace(pps))
-                        existing_paths.add(pps.path)
-                        changed = True
+                for parent_name in parents:
+                    if not parent_name or parent_name not in shape_by_class:
+                        continue
+                    for pps in shape_by_class[parent_name].property_shapes:
+                        if pps.path not in existing_paths:
+                            node_shape.property_shapes.append(dataclass_replace(pps))
+                            existing_paths.add(pps.path)
+                            changed = True
             if not changed:
                 break
 
@@ -1238,6 +1287,8 @@ class SHACLGenerator:
         return resolved
 
     def _serialize_turtle(self, graph: SHACLGraph) -> str:
+        import json
+
         lines = [self._prefix_decls(graph), ""]
         lines.append(f"<{graph.shapes_uri}> a owl:Ontology .")
         lines.append("")
@@ -1250,10 +1301,11 @@ class SHACLGenerator:
                 f"    sh:targetClass {self._uri(graph, node_shape.target_class)} ;"
             )
             if node_shape.name:
-                block.append(f'    sh:name "{node_shape.name}" ;')
+                block.append(f"    sh:name {json.dumps(node_shape.name, ensure_ascii=False)} ;")
             if node_shape.description:
-                escaped = node_shape.description.replace('"', '\\"')
-                block.append(f'    sh:description "{escaped}" ;')
+                block.append(
+                    f"    sh:description {json.dumps(node_shape.description, ensure_ascii=False)} ;"
+                )
             if node_shape.closed:
                 block.append("    sh:closed true ;")
                 block.append("    sh:ignoredProperties ( <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ) ;")
@@ -1264,7 +1316,7 @@ class SHACLGenerator:
                 parts = ["    sh:property ["]
                 parts.append(f'        sh:path {self._uri(graph, ps.path, "property")} ;')
                 if ps.datatype:
-                    parts.append(f"        sh:datatype {ps.datatype} ;")
+                    parts.append(f"        sh:datatype {self._uri(graph, ps.datatype)} ;")
                 if ps.class_:
                     parts.append(f'        sh:class {self._uri(graph, ps.class_, "class")} ;')
                 if ps.min_count is not None:
@@ -1272,13 +1324,12 @@ class SHACLGenerator:
                 if ps.max_count is not None:
                     parts.append(f"        sh:maxCount {ps.max_count} ;")
                 if ps.in_values is not None:
-                    vals = " ".join(f'"{v}"' for v in ps.in_values)
+                    vals = " ".join(json.dumps(str(v), ensure_ascii=False) for v in ps.in_values)
                     parts.append(f"        sh:in ( {vals} ) ;")
                 if ps.has_value is not None:
                     parts.append(f"        sh:hasValue {self._uri(graph, ps.has_value)} ;")
                 if ps.pattern:
-                    escaped_p = ps.pattern.replace('"', '\\"')
-                    parts.append(f'        sh:pattern "{escaped_p}" ;')
+                    parts.append(f"        sh:pattern {json.dumps(ps.pattern, ensure_ascii=False)} ;")
                 parts.append(f"        sh:severity sh:{ps.severity}")
                 parts.append("    ]" + terminator)
                 block.extend(parts)
@@ -1347,6 +1398,8 @@ class SHACLGenerator:
         return json.dumps({"@context": context, "@graph": graph_list}, indent=2)
 
     def _serialize_ntriples(self, graph: SHACLGraph) -> str:
+        import json
+
         SHACL = "http://www.w3.org/ns/shacl#"
         OWL = "http://www.w3.org/2002/07/owl#"
         RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -1365,7 +1418,7 @@ class SHACLGenerator:
             t(shape_uri, f"<{RDF}type>", f"<{SHACL}NodeShape>")
             t(shape_uri, f"<{SHACL}targetClass>", class_uri)
             if node_shape.name:
-                t(shape_uri, f"<{SHACL}name>", f'"{node_shape.name}"')
+                t(shape_uri, f"<{SHACL}name>", json.dumps(node_shape.name, ensure_ascii=False))
             if node_shape.closed:
                 t(
                     shape_uri,
@@ -1394,6 +1447,11 @@ class SHACLGenerator:
     # ── Helper ────────────────────────────────────────────────────────────────
 
     def _resolve_xsd(self, range_str: str) -> str:
-        """Map ontology range strings to xsd:-prefixed datatypes."""
-        key = range_str.lower().strip()
-        return self._XSD_ALIASES.get(key, f"xsd:{range_str}")
+        """Resolve datatype aliases without expanding an existing IRI twice."""
+        value = range_str.strip()
+        xsd_namespace = "http://www.w3.org/2001/XMLSchema#"
+        if value.startswith(xsd_namespace):
+            return f"xsd:{value[len(xsd_namespace):]}"
+        if value.startswith("xsd:") or self._is_absolute_iri(value):
+            return value
+        return self._XSD_ALIASES.get(value.lower(), f"xsd:{value}")

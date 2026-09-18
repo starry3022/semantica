@@ -37,15 +37,21 @@ class OntologyEngine:
         self.version_manager = config.get("version_manager") or VersionManager(**config)
 
     def from_data(self, data: Any, **options) -> Dict[str, Any]:
-        """Use LLM proposals for RDF; retain entity/relationship dict heuristics."""
+        """Generate a draft from candidate facts or RDF using an explicit method.
+
+        For entity/relationship dictionaries, ``method="llm"`` preserves the
+        RDFExporter vocabulary. Omission retains heuristic compatibility.
+        """
         method = options.pop("method", None)
+        if method is None:
+            method = self.config.get("method")
         if not isinstance(data, dict):
             if method not in (None, "llm"):
                 raise ValidationError("RDF ontology generation requires method='llm'")
             return self.from_rdf(data, **options)
-        if method not in (None, "heuristic"):
+        if method not in (None, "heuristic", "llm"):
             raise ValidationError(
-                "Dictionary ontology generation requires method='heuristic'"
+                "Dictionary ontology generation method must be 'llm' or 'heuristic'"
             )
         tracking_id = self.progress.start_tracking(
             module="ontology",
@@ -53,7 +59,9 @@ class OntologyEngine:
             message="Generating ontology from data",
         )
         try:
-            ontology = self.generator.generate_ontology(data, **options)
+            ontology = self.generator.generate_ontology(
+                data, method=method or "heuristic", **options
+            )
             self.progress.update_tracking(tracking_id, message="Ontology generated")
             return ontology
         except Exception as e:
@@ -418,6 +426,7 @@ class OntologyEngine:
                 shacl_str,
                 data_graph_format=data_graph_format,
                 shacl_format=shacl_format,
+                abort_on_first=abort_on_first,
             )
 
             if explain:

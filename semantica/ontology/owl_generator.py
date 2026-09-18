@@ -28,6 +28,7 @@ License: MIT
 """
 
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from ..utils.exceptions import ProcessingError, ValidationError
@@ -198,6 +199,10 @@ class OWLGenerator:
         prefix, _, local = text.partition(":")
         if prefix in ns_manager.get_all_namespaces() and local:
             return f"{ns_manager.get_all_namespaces()[prefix]}{local}"
+        # Opaque IRIs (for example urn:example:Person) are already identities.
+        # Expand known CURIEs first so owl:Thing retains its vocabulary meaning.
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", text):
+            return text
         return ns_manager.generate_class_iri(text)
 
     def _resolve_property_identifier(self, prop: Dict[str, Any]) -> str:
@@ -209,9 +214,7 @@ class OWLGenerator:
     def _resolve_datatype_range_uri(self, range_val: Any, ns_manager: NamespaceManager):
         if isinstance(range_val, str) and range_val.startswith("xsd:"):
             return XSD[range_val.replace("xsd:", "")]
-        if self._is_http_uri(range_val):
-            return URIRef(range_val)
-        return URIRef(ns_manager.generate_class_iri(str(range_val)))
+        return URIRef(self._resolve_class_uri(range_val, ns_manager))
 
     def _generate_with_rdflib(
         self, ontology: Dict[str, Any], format: str = "turtle", **options
