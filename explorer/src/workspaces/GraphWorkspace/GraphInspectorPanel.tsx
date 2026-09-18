@@ -9,6 +9,7 @@ import { SourceEvidencePanel } from "./SourceEvidencePanel";
 import { InstanceTypesPanel } from "./InstanceTypesPanel";
 import type { InstanceTypesSnapshot } from "./instanceTypes";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
+import { getNodeDisplayLabel } from "./nodeDisplayLabels";
 
 export type LinkPrediction = {
   target: string;
@@ -193,9 +194,7 @@ function PathDistanceIntelPanel({ result }: { result: PathResponse }) {
 /* ─── Path Flow Visualizer ──────────────────────────────────────── */
 
 function getNodeLabel(nodeId: string): string {
-  if (!graph.hasNode(nodeId)) return nodeId;
-  const attrs = graph.getNodeAttributes(nodeId) as { label?: string; content?: string };
-  return String(attrs.label ?? attrs.content ?? nodeId);
+  return getNodeDisplayLabel(graph, nodeId);
 }
 
 function getEdgeLabelBetween(sourceId: string, targetId: string, edgeIds?: string[]): string {
@@ -403,7 +402,7 @@ export function GraphInspectorPanel({
           </span>
         </div>
         <h3 style={{ margin: 0, color: GRAPH_THEME.ui.text.strong, fontSize: 20, fontWeight: 700, wordBreak: "break-word" }}>
-          {String(attributes?.label ?? effectiveNodeId)}
+          {getNodeLabel(effectiveNodeId)}
         </h3>
         <details key={effectiveNodeId} style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 12, marginTop: 8 }}>
           <summary style={{ cursor: "pointer" }}>Node identifier</summary>

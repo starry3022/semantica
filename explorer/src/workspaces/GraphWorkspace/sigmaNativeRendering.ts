@@ -23,6 +23,7 @@ type SemanticaNodeDrawData = {
   entityShapeKind?: number;
   entityAspectRatio?: number;
   nodeType?: string;
+  hovered?: boolean;
 };
 
 const ENTITY_TOKEN_UNIFORMS = ["u_sizeRatio", "u_correctionRatio", "u_matrix"] as const;
@@ -221,7 +222,8 @@ class EntityTokenNodeProgram extends NodeProgram<(typeof ENTITY_TOKEN_UNIFORMS)[
 
   drawLabel = drawSemanticaNodeLabel;
 
-  drawHover = drawSemanticaNodeHover;
+  // The label layer switches between a chip and a hover card; do not draw both.
+  drawHover = () => {};
 
   getDefinition() {
     return {
@@ -313,9 +315,13 @@ function drawRoundedRect(
   context.closePath();
 }
 
-export const drawSemanticaNodeLabel: NodeLabelDrawingFunction = (context, rawData) => {
+export const drawSemanticaNodeLabel: NodeLabelDrawingFunction = (context, rawData, settings) => {
   const data = rawData as typeof rawData & SemanticaNodeDrawData;
   if (!data.label) {
+    return;
+  }
+  if (data.hovered) {
+    drawSemanticaNodeHover(context, rawData, settings);
     return;
   }
 

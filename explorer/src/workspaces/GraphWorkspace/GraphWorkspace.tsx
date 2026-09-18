@@ -31,6 +31,7 @@ import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import { buildGraphColorLegend, type GraphColorLegendItem } from "./graphColorLegend";
 import { createKnowledgeGraphScope } from "./graphSchemaScope";
 import { projectInstanceTypes } from "./instanceTypeProjection";
+import { getNodeDisplayLabel, projectApprovalGroupLabels } from "./nodeDisplayLabels";
 import { useInstanceTypes } from "./useInstanceTypes";
 import { focusedUnavailableReasonText, groupedViewReasonText } from "./graphViewCopy";
 import { localGraphRequiresDraftConfirm } from "./localGraphTransition";
@@ -454,7 +455,7 @@ function SearchCommandBar({
               }}
               onMouseEnter={() => setHighlightedIndex(index)}
             >
-              <span className="explore-search-suggestion-label">{result.node.content || result.node.id}</span>
+              <span className="explore-search-suggestion-label">{getNodeDisplayLabel(graph, result.node.id, result.node.content || result.node.id)}</span>
               <span className="explore-search-suggestion-type">{result.node.type}</span>
             </li>
           ))}
@@ -1170,12 +1171,6 @@ function buildSelectedEdgeState(
   if (primaryRawEdgeId && graph.hasEdge(primaryRawEdgeId)) {
     [sourceId, targetId] = graph.extremities(primaryRawEdgeId);
   }
-  const sourceAttributes = graph.hasNode(sourceId)
-    ? (graph.getNodeAttributes(sourceId) as { label?: string; content?: string })
-    : ({ label: displaySourceId } as { label?: string; content?: string });
-  const targetAttributes = graph.hasNode(targetId)
-    ? (graph.getNodeAttributes(targetId) as { label?: string; content?: string })
-    : ({ label: displayTargetId } as { label?: string; content?: string });
   const properties = attributes.properties ?? {};
   const familyId = String(attributes.familyId || edgeId);
   let familySize = 0;
@@ -1203,9 +1198,9 @@ function buildSelectedEdgeState(
     id: edgeId,
     familyId,
     sourceId,
-    sourceLabel: String(sourceAttributes.label ?? sourceAttributes.content ?? sourceId),
+    sourceLabel: getNodeDisplayLabel(graph, sourceId, displaySourceId),
     targetId,
-    targetLabel: String(targetAttributes.label ?? targetAttributes.content ?? targetId),
+    targetLabel: getNodeDisplayLabel(graph, targetId, displayTargetId),
     edgeType: String(attributes.edgeType ?? "related_to"),
     weight: Number(attributes.weight ?? 1),
     properties,
@@ -1609,7 +1604,10 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
     void graphVersion;
     return createKnowledgeGraphScope(graph, includeOntologySchema);
   }, [graphVersion, includeOntologySchema]);
-  const scopedGraph = knowledgeScope.graph;
+  const scopedGraph = useMemo(() => {
+    void graphVersion;
+    return projectApprovalGroupLabels(knowledgeScope.graph);
+  }, [graphVersion, knowledgeScope.graph]);
 
   const resolveNodeIdForFocusedMode = useCallback((
     nodeId: string,
@@ -3373,7 +3371,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                       <button key={result.node.id} style={predictionCardStyle} onClick={() => focusNode(result.node.id)}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "#fff", fontWeight: 600 }}>{result.node.content || result.node.id}</div>
+                            <div style={{ color: "#fff", fontWeight: 600 }}>{getNodeDisplayLabel(graph, result.node.id, result.node.content || result.node.id)}</div>
                             <div style={{ color: "#8b949e", fontSize: 12 }}>{result.node.type}</div>
                           </div>
                           <div style={{ color: "#58a6ff", fontSize: 12, whiteSpace: "nowrap" }}>

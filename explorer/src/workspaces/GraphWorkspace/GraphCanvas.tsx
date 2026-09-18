@@ -48,7 +48,6 @@ import {
 import {
   SEMANTICA_EDGE_PROGRAM_CLASSES,
   SEMANTICA_NODE_PROGRAM_CLASSES,
-  drawSemanticaNodeHover,
   drawSemanticaNodeLabel,
 } from "./sigmaNativeRendering";
 import {
@@ -176,7 +175,7 @@ const SIGMA_SETTINGS = {
   nodeProgramClasses: SEMANTICA_NODE_PROGRAM_CLASSES,
   edgeProgramClasses: SEMANTICA_EDGE_PROGRAM_CLASSES,
   defaultDrawNodeLabel: drawSemanticaNodeLabel,
-  defaultDrawNodeHover: drawSemanticaNodeHover,
+  defaultDrawNodeHover: () => {},
 };
 
 const DEBUG_GRAPH_RUNTIME = import.meta.env.DEV;
@@ -1131,6 +1130,7 @@ function applySceneState(
         size: resolvedStyle.size,
         forceLabel: resolvedStyle.forceLabel,
         label: resolvedStyle.label,
+        hovered: node === currentState.hoveredNodeId,
         zIndex: resolvedStyle.zIndex,
         hidden: resolvedStyle.hidden,
         borderColor: resolvedStyle.borderColor,
