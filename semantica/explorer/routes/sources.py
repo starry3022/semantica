@@ -11,6 +11,15 @@ from ..source_resources import SourceResourceRegistry
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_RULE_COMPONENT_TYPES = {
+    "hasActor": "Role",
+    "hasRecipient": "Role",
+    "hasActivity": "Activity",
+    "hasApprovalGroup": "ApprovalGroup",
+    "hasCondition": "Condition",
+    "requiresDocument": "RequiredDocument",
+    "hasDeadline": "RelativeDeadline",
+}
 
 
 def _string(value) -> Optional[str]:
@@ -131,6 +140,62 @@ def _validate_evidence(
         entry.update(status="aligned", reason=None)
 
 
+def _related_process_rules(session, edges, node_id, edge_id) -> list[dict]:
+    """Offer navigation along typed process links, never promote rule citations.
+
+    The only two-hop path is ProcessRule -> ApprovalGroup -> Role. Arbitrary
+    neighbors, schema terms, and links through another shared role are excluded.
+    The caller holds the graph lock for a consistent selection snapshot.
+    """
+    if node_id is not None:
+        selected = _read_node(session, node_id)
+        if not selected or selected["type"] not in _RULE_COMPONENT_TYPES.values():
+            return []
+    incoming: dict[str, list[dict]] = {}
+    for edge in edges:
+        incoming.setdefault(edge["target"], []).append(edge)
+    candidates = (
+        incoming.get(node_id, [])
+        if node_id is not None
+        else [edge for edge in edges if edge["id"] == edge_id]
+    )
+    rules = {}
+    for edge in candidates:
+        source = _read_node(session, edge["source"])
+        target = _read_node(session, edge["target"])
+        if source is None or target is None:
+            continue
+        if (
+            edge["type"] == "hasRole"
+            and source["type"] == "ApprovalGroup"
+            and target["type"] == "Role"
+        ):
+            owners = [
+                _read_node(session, parent["source"])
+                for parent in incoming.get(edge["source"], [])
+                if parent["type"] == "hasApprovalGroup"
+            ]
+        elif target["type"] == _RULE_COMPONENT_TYPES.get(edge["type"]):
+            owners = [source]
+        else:
+            continue
+        for rule in owners:
+            if rule is None or rule["type"] != "ProcessRule":
+                continue
+            properties = _properties(rule)
+            rules[rule["id"]] = {
+                "id": rule["id"],
+                "label": _string(rule.get("content")) or rule["id"],
+                "source_clause_id": _string(properties.get("source_clause_id")),
+                "fact_status": _string(properties.get("fact_status")),
+                "review_status": _string(properties.get("review_status")),
+            }
+    return sorted(
+        rules.values(),
+        key=lambda rule: (rule["source_clause_id"] or "", rule["label"], rule["id"]),
+    )
+
+
 def _source_view(
     session: GraphSession,
     resources: SourceResourceRegistry,
@@ -207,11 +272,13 @@ def _source_view(
         evidence.sort(
             key=lambda item: {"primary": 0, "supporting": 1, "unknown": 2}[item["role"]]
         )
+        related_rules = _related_process_rules(session, edges, node_id, edge_id)
         return {
             "selection": selection,
             "evidence": evidence,
             "sources": list(sources.values()),
-            "status": "ok" if evidence or sources else "no_evidence",
+            "related_rules": related_rules,
+            "status": "ok" if evidence or sources or related_rules else "no_evidence",
         }
 
 

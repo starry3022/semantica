@@ -252,6 +252,39 @@ files or source URLs. These operations preserve the saved candidate graph and
 evidence review states. Repeat the imports and context registration after
 restarting a session. Reopen Ontology Hub after registering the context.
 
+In **Knowledge Explorer**, **Open source material** is available for rules,
+evidence and source documents, as well as `Role`, `Activity`, `ApprovalGroup`,
+`Condition`, `RequiredDocument` and `RelativeDeadline` nodes with explicitly
+associated process rules. In the dialog, **Related rule evidence** selects the
+rule; **Primary** and **Supporting** select its citations. The rule selector stays
+visible when locating a quotation, and only the source text scrolls automatically.
+The material title, version and availability stay visible. Expand **Source details
+& SHA-256** for the source ID, URI and complete expected/actual hashes.
+These business-node links require the process graph and registered materials;
+they do not require a business ontology or its evidence-context configuration.
+
+Related rules are resolved only through correctly typed `hasActor`,
+`hasRecipient`, `hasActivity`, `hasApprovalGroup`, `hasCondition`,
+`requiresDocument` and `hasDeadline` links. A role can also reach its rule through
+`ProcessRule → hasApprovalGroup → ApprovalGroup → hasRole → Role`.
+Selecting one of these relationships scopes the rule list to that relationship,
+even when its target is shared by other rules. Arbitrary neighbors and reverse
+or mistyped links do not supply evidence.
+
+**Direct evidence** and **Related rule evidence** remain separate when both
+exist. The latter supports navigation to the owning rule's context; it does not
+prove each field or individual relationship. Rule and evidence review states
+remain unchanged. Switching rules, sources or nodes clears previous content and
+highlights. Missing material or invalid hash/range/quotation shows the existing
+failure reason; a rule without evidence stays empty. Legacy nodes without
+explicit references remain browsable with a no-evidence state.
+
+The read-only `/api/sources/view` response exposes related rule summaries in
+`related_rules` without copying their citations into the selection's direct
+`evidence` or `sources`. Selecting a related rule loads its existing source view
+on demand. Material registration and source validation are shared with direct
+rule navigation; no additional RDF statements or review decisions are written.
+
 With a registered business context, **Ontology Hub → Graph** is the
 default view, initially showing the business ontology. A single **Active ontology**
 selector lists every loaded ontology and shows the currently displayed resource,

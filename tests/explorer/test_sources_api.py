@@ -345,3 +345,188 @@ def test_selection_must_be_unambiguous(sources_client, params):
 def test_missing_selection_returns_404(sources_client, params):
     client, _, _ = sources_client
     assert client.get("/api/sources/view", params=params).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("kind", "predicate"),
+    [
+        ("Role", "hasActor"),
+        ("Role", "hasRecipient"),
+        ("Activity", "hasActivity"),
+        ("ApprovalGroup", "hasApprovalGroup"),
+        ("Condition", "hasCondition"),
+        ("RequiredDocument", "requiresDocument"),
+        ("RelativeDeadline", "hasDeadline"),
+    ],
+)
+def test_business_nodes_and_edges_expose_rule_context_without_claiming_direct_evidence(
+    sources_client, kind, predicate
+):
+    client, graph, _ = sources_client
+    graph.add_node("business", kind, "业务节点")
+    graph.add_edge(RULE, "business", predicate, id="business-link")
+    before = graph.find_edges()
+    for selection in [{"node_id": "business"}, {"edge_id": "business-link"}]:
+        view = client.get("/api/sources/view", params=selection).json()
+        assert view["status"] == "ok"
+        assert view["related_rules"] == [
+            {
+                "id": RULE,
+                "label": "采购审批",
+                "source_clause_id": "C2",
+                "fact_status": "candidate",
+                "review_status": "unreviewed",
+            }
+        ]
+        # Related citations must not be promoted to direct node/edge evidence.
+        assert view["evidence"] == []
+        assert view["sources"] == []
+    assert graph.find_edges() == before
+
+
+def test_approval_membership_follows_only_its_own_group_and_deduplicates_rules(
+    sources_client,
+):
+    client, graph, _ = sources_client
+    graph.add_node("manager", "Role", "部门负责人")
+    graph.add_node("group", "ApprovalGroup", "审批组 (all)")
+    graph.add_node("other-role", "Role", "其他角色")
+    graph.add_node("other-group", "ApprovalGroup", "其他审批组")
+    graph.add_node("other-rule", "ProcessRule", "其他规则")
+    graph.add_edge(RULE, "group", "hasApprovalGroup", id="group-link")
+    graph.add_edge("group", "manager", "hasRole", id="membership")
+    graph.add_edge("other-rule", "other-group", "hasApprovalGroup")
+    graph.add_edge("other-group", "other-role", "hasRole")
+    # Traversing through shared roles would incorrectly reach this other group.
+    graph.add_edge("group", "other-role", "hasRole")
+    for selection in [{"node_id": "manager"}, {"edge_id": "membership"}]:
+        view = client.get("/api/sources/view", params=selection).json()
+        assert [r["id"] for r in view["related_rules"]] == [RULE]
+        assert view["evidence"] == []
+    graph.add_edge(RULE, "manager", "hasActor")
+    graph.add_edge(RULE, "manager", "hasRecipient")
+    view = client.get("/api/sources/view", params={"node_id": "manager"}).json()
+    assert [r["id"] for r in view["related_rules"]] == [RULE]
+
+
+@pytest.mark.parametrize(
+    ("owner_type", "target_type", "predicate", "reverse"),
+    [
+        ("ProcessRule", "Role", "relatedTo", False),
+        ("ProcessRule", "Role", "hasActivity", False),
+        ("ProcessRule", "Note", "hasActor", False),
+        ("ProcessRule", "owl:Class", "hasActor", False),
+        ("ProcessRule", "Role", "hasActor", True),
+        ("Note", "Role", "hasActor", False),
+        ("ApprovalGroup", "Note", "hasRole", False),
+    ],
+)
+def test_unrelated_or_mistyped_neighbors_never_supply_rule_evidence(
+    sources_client, owner_type, target_type, predicate, reverse
+):
+    client, graph, _ = sources_client
+    graph.add_node("owner", owner_type, "采购审批")
+    graph.add_node("target", target_type, "部门负责人")
+    graph.add_edge("owner", EVIDENCE, "hasEvidence")
+    graph.add_edge(RULE, "owner", "hasApprovalGroup")
+    graph.add_edge(
+        "target" if reverse else "owner",
+        "owner" if reverse else "target",
+        predicate,
+        id="wrong-link",
+    )
+    for selection in [{"node_id": "target"}, {"edge_id": "wrong-link"}]:
+        view = client.get("/api/sources/view", params=selection).json()
+        assert view["related_rules"] == []
+        assert view["status"] == "no_evidence"
+        assert view["evidence"] == []
+        assert view["sources"] == []
+
+
+def test_shared_role_keeps_each_rules_sources_and_primary_supporting_roles_separate(
+    sources_client,
+):
+    client, graph, resources = sources_client
+    graph.add_node("manager", "Role", "部门负责人")
+    graph.add_node(
+        "second-rule",
+        "ProcessRule",
+        "另一份制度",
+        source_clause_id="C1",
+        supporting_clause_ids=["C2"],
+        fact_status="candidate",
+        review_status="unreviewed",
+    )
+    graph.add_edge(RULE, "manager", "hasActor")
+    graph.add_edge("second-rule", "manager", "hasRecipient")
+    graph.add_edge("second-rule", "support", "hasEvidence")
+    graph.add_edge("second-rule", EVIDENCE, "hasEvidence")
+    resources.register_text("other-policy", "其他😀材料")
+    graph.add_node(
+        "other-evidence",
+        "Evidence",
+        quote="😀材料",
+        start_char=2,
+        end_char=5,
+        source_id="other-policy",
+        source_sha256=hashlib.sha256("其他😀材料".encode()).hexdigest(),
+    )
+    graph.add_edge("second-rule", "other-evidence", "hasEvidence")
+    related = client.get("/api/sources/view", params={"node_id": "manager"}).json()
+    assert {r["id"] for r in related["related_rules"]} == {RULE, "second-rule"}
+    assert related["evidence"] == related["sources"] == []
+    first = client.get("/api/sources/view", params={"node_id": RULE}).json()
+    second = client.get("/api/sources/view", params={"node_id": "second-rule"}).json()
+    assert [(e["id"], e["role"]) for e in first["evidence"]] == [
+        (EVIDENCE, "primary"),
+        ("support", "supporting"),
+    ]
+    assert [(e["id"], e["role"]) for e in second["evidence"]] == [
+        ("support", "primary"),
+        (EVIDENCE, "supporting"),
+        ("other-evidence", "unknown"),
+    ]
+    assert [s["source_id"] for s in first["sources"]] == ["policy"]
+    assert {s["source_id"] for s in second["sources"]} == {"policy", "other-policy"}
+    assert all(e["status"] == "aligned" for e in second["evidence"])
+
+
+def test_explicit_and_related_evidence_remain_separate_for_nodes_and_edges(
+    sources_client,
+):
+    client, graph, _ = sources_client
+    graph.add_node("manager", "Role", "部门负责人")
+    graph.add_edge("manager", "support", "hasEvidence")
+    graph.add_edge(RULE, "manager", "hasActor", id="actor", evidence_ids=["support"])
+    for selection in [{"node_id": "manager"}, {"edge_id": "actor"}]:
+        view = client.get("/api/sources/view", params=selection).json()
+        assert [e["id"] for e in view["evidence"]] == ["support"]
+        assert [r["id"] for r in view["related_rules"]] == [RULE]
+        assert view["evidence"][0]["role"] == "unknown"
+
+
+def test_related_rule_without_evidence_does_not_borrow_another_rules_source(
+    sources_client,
+):
+    client, graph, _ = sources_client
+    graph.add_node("empty-rule", "ProcessRule", "无引用规则")
+    graph.add_node("manager", "Role", "部门负责人")
+    graph.add_edge("empty-rule", "manager", "hasActor")
+    graph.add_edge(RULE, "manager", "hasActor")
+    view = client.get("/api/sources/view", params={"node_id": "manager"}).json()
+    assert {r["id"] for r in view["related_rules"]} == {RULE, "empty-rule"}
+    empty = client.get("/api/sources/view", params={"node_id": "empty-rule"}).json()
+    assert empty["status"] == "no_evidence"
+    assert empty["evidence"] == empty["sources"] == empty["related_rules"] == []
+
+
+def test_business_edge_keeps_only_its_rule_when_the_target_is_shared(sources_client):
+    client, graph, _ = sources_client
+    graph.add_node("manager", "Role", "部门负责人")
+    graph.add_node("another-rule", "ProcessRule", "另一规则")
+    graph.add_edge(RULE, "manager", "hasActor", id="first-actor")
+    graph.add_edge("another-rule", "manager", "hasActor", id="second-actor")
+    for edge_id, rule_id in [("first-actor", RULE), ("second-actor", "another-rule")]:
+        view = client.get("/api/sources/view", params={"edge_id": edge_id}).json()
+        assert [rule["id"] for rule in view["related_rules"]] == [rule_id]
+        assert view["evidence"] == view["sources"] == []

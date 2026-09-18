@@ -26,10 +26,19 @@ export interface SourceEvidence {
   review_status: string | null;
 }
 
+export interface SourceRelatedRule {
+  id: string;
+  label: string;
+  source_clause_id: string | null;
+  fact_status: string | null;
+  review_status: string | null;
+}
+
 export interface SourceView {
   selection: { kind: "node" | "edge"; id: string; label: string };
   evidence: SourceEvidence[];
   sources: SourceMaterial[];
+  related_rules?: SourceRelatedRule[];
   status: "ok" | "no_evidence";
 }
 
