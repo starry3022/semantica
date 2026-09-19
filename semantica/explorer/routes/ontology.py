@@ -8,6 +8,7 @@ import ipaddress
 import logging
 import socket
 import uuid
+from copy import deepcopy
 from datetime import datetime, UTC
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -727,6 +728,9 @@ def _convert_ontology_to_graph(ontology_dict: Dict[str, Any]) -> Tuple[List[Dict
                 "scheme_uri": ontology_uri,
             },
         }
+        for key in ("domain_expressions", "range_expressions"):
+            if prop.get(key):
+                node["properties"][key] = deepcopy(prop[key])
         nodes.append(node)
         
         # Add domain and range edges
@@ -994,6 +998,9 @@ def _ontology_dict_from_nodes(uri: str, name: str, nodes: List[Dict[str, Any]], 
                 "range": range_,
                 "required": False,
             })
+            for key in ("domain_expressions", "range_expressions"):
+                if node.get("properties", {}).get(key):
+                    item[key] = deepcopy(node["properties"][key])
             properties.append(item)
 
     return {
@@ -1282,6 +1289,7 @@ def _parse_rdf_sync(content: bytes, fmt: str) -> tuple:
     """Return (nodes, edges, metadata). Raises HTTPException on failure."""
     try:
         import rdflib
+        from ...utils.ontology_expressions import property_domain_range_expressions
     except ImportError:
         raise HTTPException(status_code=501, detail="rdflib is not installed.")
 
@@ -1359,6 +1367,12 @@ def _parse_rdf_sync(content: bytes, fmt: str) -> tuple:
         seen_ids.add(sid)
         props = dict(literal_props.get(sid, {}))
         props["uri"] = sid
+        if ntype in _CLASS_TYPES | _PROPERTY_TYPES:
+            props["scheme_uri"] = metadata["uri"]
+        try:
+            props.update(property_domain_range_expressions(g, subj))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         label = (
             props.get("rdfs:label")
             or props.get("skos:prefLabel")
@@ -2687,6 +2701,18 @@ async def _generated_shacl_for_uri(
         nodes, edges = await _fetch_analysis_graph(session, uri, "shacl-generate")
     entities = _ontology_entities(nodes, uri)
     ontology_dict = _ontology_dict_from_nodes(uri, entry.name, entities, edges)
+    if any(
+        prop.get("domain_expressions") or prop.get("range_expressions")
+        for prop in ontology_dict["properties"]
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "SHACL generation cannot preserve complex domain/range expressions. "
+                "The loaded expressions are retained; provide explicit SHACL shapes "
+                "instead of generating incomplete constraints."
+            ),
+        )
 
     try:
         from ...ontology import OntologyEngine

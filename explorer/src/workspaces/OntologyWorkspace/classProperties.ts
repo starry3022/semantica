@@ -1,10 +1,13 @@
 import type { OntologyGraphEdge, OntologyGraphNode } from "./api";
 import { classifyNodeType, compactNodeType } from "./ontologyEditorModel";
+import { readClassExpressions, type ClassExpression } from "./classExpressions";
 
 export type ClassProperty = {
   node: OntologyGraphNode;
   domain: string[];
   range: string[];
+  domainExpressions: ClassExpression[];
+  rangeExpressions: ClassExpression[];
   inheritedFrom: string[];
 };
 
@@ -12,7 +15,7 @@ export function classPropertyGroups(classUri: string, nodes: OntologyGraphNode[]
   const groups: { declared: ClassProperty[]; inherited: ClassProperty[]; incoming: ClassProperty[] } = {
     declared: [], inherited: [], incoming: [],
   };
-  const classIds = new Set(nodes.filter((node) => classifyNodeType(node.type) === "class").map((node) => node.id));
+  const classIds = new Set(nodes.filter((node) => classifyNodeType(node.type) === "class" && !node.id.startsWith("_:" )).map((node) => node.id));
   if (!classIds.has(classUri)) return groups;
   const parents = new Map<string, Set<string>>();
   const domains = new Map<string, Set<string>>();
@@ -38,11 +41,15 @@ export function classPropertyGroups(classUri: string, nodes: OntologyGraphNode[]
   for (const node of properties) {
     const domain = [...(domains.get(node.id) || [])].sort();
     const range = [...(ranges.get(node.id) || [])].sort();
-    const inheritedFrom = domain.filter((id) => ancestors.has(id));
-    const row = { node, domain, range, inheritedFrom };
-    if (domain.includes(classUri)) groups.declared.push(row);
+    const domainExpressions = readClassExpressions(node.properties?.domain_expressions);
+    const rangeExpressions = readClassExpressions(node.properties?.range_expressions);
+    const domainMembers = new Set([...domain, ...domainExpressions.flatMap((expression) => expression.kind === "unionOf" ? expression.members : [])]);
+    const rangeMembers = new Set([...range, ...rangeExpressions.flatMap((expression) => expression.kind === "unionOf" ? expression.members : [])]);
+    const inheritedFrom = [...domainMembers].filter((id) => ancestors.has(id)).sort();
+    const row = { node, domain, range, domainExpressions, rangeExpressions, inheritedFrom };
+    if (domainMembers.has(classUri)) groups.declared.push(row);
     else if (inheritedFrom.length) groups.inherited.push(row);
-    if (range.includes(classUri)) groups.incoming.push(row);
+    if (rangeMembers.has(classUri)) groups.incoming.push(row);
   }
   return groups;
 }

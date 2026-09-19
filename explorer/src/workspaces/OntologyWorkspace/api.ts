@@ -8,6 +8,7 @@ import type {
   ShaclShapesResponse,
   ShaclValidationResponse,
 } from "./types";
+import { isClassExpression, type ClassExpression } from "./classExpressions";
 
 export type OntologyEvidenceContext = {
   configured: boolean;
@@ -98,6 +99,8 @@ export type OntologyTermSnapshot = {
     parents: string[];
     domain: string[];
     range: string[];
+    domain_expressions?: ClassExpression[];
+    range_expressions?: ClassExpression[];
   };
 };
 
@@ -114,11 +117,13 @@ async function readOntologyTermResponse(response: Response, ontologyUri: string,
   }
   const term = data?.term;
   const stringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+  const expressionList = (value: unknown) => value === undefined || (Array.isArray(value) && value.every(isClassExpression));
   if (data?.ontology_uri !== ontologyUri || data?.term_uri !== termUri || data?.scope !== "session"
       || typeof data?.revision !== "string" || !data.revision || term?.id !== termUri
       || !["owl:Class", "owl:ObjectProperty", "owl:DatatypeProperty"].includes(term?.type)
       || typeof term?.label !== "string" || typeof term?.comment !== "string"
-      || !stringList(term?.parents) || !stringList(term?.domain) || !stringList(term?.range)) {
+      || !stringList(term?.parents) || !stringList(term?.domain) || !stringList(term?.range)
+      || !expressionList(term?.domain_expressions) || !expressionList(term?.range_expressions)) {
     throw new Error("Term definition could not be loaded: mismatched or invalid response.");
   }
   return data as OntologyTermSnapshot;

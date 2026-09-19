@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import type { OntologyGraphEdge, OntologyGraphNode } from "./api";
 import { classPropertyGroups, type ClassProperty } from "./classProperties";
 import { compactNodeType } from "./ontologyEditorModel";
+import { formatClassConstraint } from "./classExpressions";
 
 type Props = {
   classUri: string;
@@ -14,11 +15,11 @@ export function ClassPropertiesPanel({ classUri, nodes, edges, onSelectTerm }: P
   const groups = classPropertyGroups(classUri, nodes, edges);
   const names = new Map(nodes.map((node) => [node.id, node.content || node.id]));
   const name = (uri: string) => names.get(uri) || uri;
-  const rows = (items: ClassProperty[]) => items.map(({ node, domain, range, inheritedFrom }) => <article key={node.id} style={rowStyle}>
+  const rows = (items: ClassProperty[]) => items.map(({ node, domain, range, domainExpressions, rangeExpressions, inheritedFrom }) => <article key={node.id} style={rowStyle}>
     <button type="button" aria-label={`View property ${name(node.id)}`} onClick={() => onSelectTerm(node.id)} style={buttonStyle}>{name(node.id)}</button>
     <div style={mutedStyle}>{compactNodeType(node.type) === "owl:DatatypeProperty" ? "Data property" : compactNodeType(node.type) === "owl:ObjectProperty" ? "Object property" : compactNodeType(node.type)}</div>
-    <div style={mutedStyle}>Domain: {domain.length ? domain.map(name).join(" · ") : "Not declared"}</div>
-    <div style={mutedStyle}>Range: {range.length ? range.map(name).join(" · ") : "Not declared"}</div>
+    <div style={mutedStyle}>Domain: {formatClassConstraint(domain, domainExpressions, name)}</div>
+    <div style={mutedStyle}>Range: {formatClassConstraint(range, rangeExpressions, name)}</div>
     {inheritedFrom.length ? <div style={mutedStyle}>Declared on parent: {inheritedFrom.map(name).join(" · ")}</div> : null}
     {typeof node.properties?.["rdfs:comment"] === "string" && node.properties["rdfs:comment"] ? <details>
       <summary style={{ ...mutedStyle, cursor: "pointer" }}>Definition & source notes</summary>

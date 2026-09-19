@@ -44,6 +44,7 @@ from rdflib import RDF, RDFS, OWL, Dataset, Graph
 
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
+from ..utils.ontology_expressions import property_domain_range_expressions
 from ..utils.progress_tracker import get_progress_tracker
 
 
@@ -405,6 +406,8 @@ class OntologyIngestor:
         )
         if ranges:
             prop_def["range"] = ranges[0] if len(ranges) == 1 else ranges
+
+        prop_def.update(property_domain_range_expressions(graph, subject))
             
         properties_dict[uri] = prop_def
 

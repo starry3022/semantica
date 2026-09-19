@@ -134,6 +134,9 @@ def _document(ontology_uri, node, edges):
             for field in _PREDICATES
         },
     }
+    for key in ("domain_expressions", "range_expressions"):
+        if properties.get(key):
+            term[key] = copy.deepcopy(properties[key])
     # Include both raw metadata containers and exact edge identity/metadata so
     # concurrent edits outside this form cannot be silently overwritten.
     snapshot = {
@@ -191,6 +194,11 @@ def _validate_changes(graph, current, body):
         wanted = set(getattr(body, field))
         if wanted == set(current[field]):
             continue
+        if current.get(f"{field}_expressions"):
+            raise HTTPException(
+                400,
+                f"{field} contains a complex expression and cannot be changed by this form.",
+            )
         if field not in fields:
             raise HTTPException(400, f"{field} cannot be edited for this term type.")
         for reference in wanted:

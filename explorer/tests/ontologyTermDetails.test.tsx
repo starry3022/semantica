@@ -356,3 +356,80 @@ test("untrusted labels, definitions and errors remain literal text in both viewi
   assert.equal(view.container.querySelector("img"), null);
   assert.equal(view.container.querySelector("script"), null);
 });
+
+for (const side of ["domain", "range"] as const) {
+  test(`a union ${side} stays read-only while the other side and label remain editable`, async () => {
+    const uri = `${ontologyUri}name`;
+    const original = {
+      ...current, term_uri: uri,
+      term: { ...current.term, id: uri, type: "owl:ObjectProperty", parents: [], domain: [`${ontologyUri}NamedDomain`], range: [`${ontologyUri}NamedRange`], [`${side}_expressions`]: [{ kind: "unionOf", members: [`${ontologyUri}Role`, `${ontologyUri}Activity`] }] },
+    };
+    const editable = side === "domain" ? "range" : "domain";
+    const editableLabel = editable === "domain" ? "Domain class IRIs" : "Range IRIs";
+    const lockedLabel = side === "domain" ? "Domain class IRIs" : "Range IRIs";
+    let patch: Record<string, unknown> | undefined;
+    globalThis.fetch = async (_input, init) => {
+      if (init?.method === "PATCH") {
+        patch = JSON.parse(String(init.body));
+        return response({ ...original, term: { ...original.term, label: "新名称", [editable]: [`${ontologyUri}Changed`] } });
+      }
+      return response(original);
+    };
+    const view = render(<OntologyTermDetails ontologyUri={ontologyUri} termUri={uri} onSaved={() => undefined} />);
+    fireEvent.click(await view.findByRole("button", { name: "Edit property" }));
+    assert.match(view.container.textContent ?? "", /read.only/i);
+    assert.match(view.container.textContent ?? "", new RegExp(`${original.term[side][0]} AND \\(${ontologyUri}Role OR ${ontologyUri}Activity\\)`));
+    assert.equal(view.queryByRole("textbox", { name: lockedLabel }), null);
+    assert.ok(view.getByRole("textbox", { name: editableLabel }));
+    fireEvent.change(view.getByRole("textbox", { name: "Label" }), { target: { value: "新名称" } });
+    fireEvent.change(view.getByRole("textbox", { name: editableLabel }), { target: { value: `${ontologyUri}Changed` } });
+    fireEvent.click(view.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => assert.ok(patch));
+    assert.deepEqual(patch, { expected_revision: revision, label: "新名称", comment: original.term.comment, parents: [], domain: original.term.domain, range: original.term.range, [editable]: [`${ontologyUri}Changed`] });
+    assert.equal(`${side}_expressions` in patch!, false);
+    await view.findByRole("button", { name: "Edit property" });
+    assert.match(view.container.textContent ?? "", /Role OR .*Activity/);
+  });
+}
+
+test("opaque expressions remain explicit and read-only without interpreting or rendering their RDF", async () => {
+  const uri = `${ontologyUri}opaque`;
+  const opaque = '<script>window.expressionBad=1</script>';
+  const term = { ...current, term_uri: uri, term: { ...current.term, id: uri, type: "owl:ObjectProperty", parents: [], domain_expressions: [{ kind: "unsupported", rdf: opaque, root: "_:anonymous", rdf_format: "nt", reason: "Nested expression" }], range_expressions: [{ kind: "unionOf", members: [`${ontologyUri}Role`, `${ontologyUri}Activity`] }] } };
+  globalThis.fetch = async () => response(term);
+  const view = render(<OntologyTermDetails ontologyUri={ontologyUri} termUri={uri} onSaved={() => undefined} />);
+  fireEvent.click(await view.findByRole("button", { name: "Edit property" }));
+  assert.match(view.container.textContent ?? "", /Unsupported OWL expression/);
+  assert.equal(view.queryByRole("textbox", { name: "Domain class IRIs" }), null);
+  assert.equal(view.queryByRole("textbox", { name: "Range IRIs" }), null);
+  assert.ok(view.getByRole("textbox", { name: "Label" }));
+  assert.ok(view.getByRole("textbox", { name: "Definition and source notes" }));
+  assert.equal(view.container.querySelector("script"), null);
+  assert.equal(view.container.textContent?.includes(opaque), false);
+});
+
+test("malformed optional class expressions cannot become an editable term", async () => {
+  for (const expression of [null, { kind: "unionOf", members: [null] }, { kind: "unionOf", members: [] }, { kind: "unionOf", members: "Role" }, { kind: "invented", members: [termUri] }]) {
+    globalThis.fetch = async () => response({ ...current, term: { ...current.term, domain_expressions: [expression] } });
+    const view = render(<OntologyTermDetails ontologyUri={ontologyUri} termUri={termUri} onSaved={() => assert.fail("invalid expressions must not save")} />);
+    assert.match((await view.findByRole("alert")).textContent ?? "", /mismatched or invalid response/);
+    assert.equal(view.queryByRole("button", { name: "Edit class" }), null);
+    cleanup();
+  }
+});
+
+test("switching from an expression property clears its read-only state for a legacy simple property", async () => {
+  const unionUri = `${ontologyUri}unionProperty`;
+  const simpleUri = `${ontologyUri}simpleProperty`;
+  globalThis.fetch = async (input) => {
+    const id = new URL(String(input), "http://localhost").searchParams.get("term_uri")!;
+    return response({ ...current, term_uri: id, term: { ...current.term, id, type: "owl:ObjectProperty", parents: [], ...(id === unionUri ? { domain_expressions: [{ kind: "unionOf", members: [`${ontologyUri}Role`, `${ontologyUri}Activity`] }] } : {}) } });
+  };
+  const view = render(<OntologyTermDetails ontologyUri={ontologyUri} termUri={unionUri} onSaved={() => undefined} />);
+  fireEvent.click(await view.findByRole("button", { name: "Edit property" }));
+  assert.equal(view.queryByRole("textbox", { name: "Domain class IRIs" }), null);
+  view.rerender(<OntologyTermDetails ontologyUri={ontologyUri} termUri={simpleUri} onSaved={() => undefined} />);
+  fireEvent.click(await view.findByRole("button", { name: "Edit property" }));
+  assert.ok(view.getByRole("textbox", { name: "Domain class IRIs" }));
+  assert.equal(view.container.textContent?.includes("Role OR"), false);
+});
