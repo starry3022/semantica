@@ -1,0 +1,86 @@
+{
+  "classes": [
+    {
+      "name": "ApprovalRole",
+      "uri": "https://semantica.dev/ns#ApprovalRole",
+      "label": "候选类别",
+      "comment": "制度中的候选类别",
+      "subClassOf": null,
+      "evidence_nodes": [
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa"
+      ]
+    },
+    {
+      "name": "PaymentRequest",
+      "uri": "https://semantica.dev/ns#PaymentRequest",
+      "label": "候选类别",
+      "comment": "制度中的候选类别",
+      "subClassOf": null,
+      "evidence_nodes": [
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb"
+      ]
+    }
+  ],
+  "properties": [
+    {
+      "name": "approves",
+      "uri": "https://semantica.dev/ns#approves",
+      "label": "候选属性",
+      "comment": "制度中的候选属性",
+      "type": "object",
+      "domain": [
+        "https://semantica.dev/ns#ApprovalRole"
+      ],
+      "range": [
+        "https://semantica.dev/ns#PaymentRequest"
+      ],
+      "evidence_nodes": [
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa"
+      ]
+    },
+    {
+      "name": "confidence",
+      "uri": "https://semantica.dev/ns#confidence",
+      "label": "候选属性",
+      "comment": "制度中的候选属性",
+      "type": "data",
+      "domain": [],
+      "range": [
+        "http://www.w3.org/2001/XMLSchema#decimal"
+      ],
+      "evidence_nodes": [
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb"
+      ]
+    },
+    {
+      "name": "text",
+      "uri": "https://semantica.dev/ns#text",
+      "label": "候选属性",
+      "comment": "制度中的候选属性",
+      "type": "data",
+      "domain": [],
+      "range": [
+        "http://www.w3.org/2001/XMLSchema#string"
+      ],
+      "evidence_nodes": [
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+        "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb"
+      ]
+    }
+  ],
+  "uri": "https://example.test/candidate/",
+  "name": "LegacyCandidate",
+  "version": null,
+  "metadata": {
+    "source": "llm",
+    "input_kind": "candidate_facts",
+    "provider": "openai",
+    "model": "legacy-fixture",
+    "prompt_version": "candidate-facts-ontology-v2",
+    "prompt_sha256": "0b244f254de86630f9f92424a3e6b8f9f3628f83331b9076a2acac18efe54cd2",
+    "input_rdf_sha256": "83387b94dc28486d9a75d36686f29f9a0e46035b722fb44f2c1ec41b7915ef70",
+    "fact_status": "candidate",
+    "review_status": "unreviewed"
+  }
+}

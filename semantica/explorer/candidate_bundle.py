@@ -1,8 +1,8 @@
 """Portable Explorer projection of native candidate facts and one ontology draft.
 
-The base RDF is authoritative for instance types, predicates and literal values.
-Explicit citations and extraction qualifiers are viewer metadata, not additional
-RDF assertions or business approval. No bundle path becomes an HTTP file route.
+The base RDF is authoritative. Version 2 displays its qualified assertions through
+a separate business projection; version 1 retains its original metadata overlay.
+Neither representation implies business approval. Bundle paths are not HTTP routes.
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ import re
 from rdflib import BNode, Literal, RDF, URIRef
 
 from ..export.rdf_exporter import RDFExporter, SEMANTICA_NS
+from ..ontology.candidate_statements import REPRESENTATION, prepare_candidate_statements
 from ..ontology.rdf_input import prepare_rdf_input
+from ..utils.exceptions import ValidationError
 
 
 _REQUIRED_FILES = {
@@ -92,6 +94,19 @@ def _json_document(content: bytes, name: str) -> dict:
     return value
 
 
+def _validate_qualified_ontology_inputs(ontology, statements):
+    bindings = {
+        "input_rdf_sha256": statements.prepared.sha256,
+        "input_facts_sha256": statements.facts_sha256,
+        "projection_rdf_sha256": statements.projection.sha256,
+    }
+    metadata = ontology.get("metadata") or {}
+    if any(metadata.get(key) != value for key, value in bindings.items()):
+        raise ValueError(
+            "Candidate ontology input bindings do not match its facts and RDF."
+        )
+
+
 def read_candidate_bundle(bundle_path: str | Path) -> dict[str, bytes]:
     """Read only contained, hash-verified files, returning immutable file bytes.
 
@@ -145,6 +160,47 @@ def read_candidate_bundle(bundle_path: str | Path) -> dict[str, bytes]:
         declared = source.get("source_sha256") or source.get("sha256")
         if declared is not None and declared != hashlib.sha256(files[name]).hexdigest():
             raise ValueError("The source manifest hash does not match its material.")
+    ontology = _json_document(files["ontology.json"], "ontology.json")
+    facts = _json_document(files["facts.json"], "facts.json")
+    metadata = ontology.get("metadata", {})
+    generation = summary.get("generation", {})
+    if not isinstance(metadata, dict) or not isinstance(generation, dict):
+        raise ValueError("Bundle representation and generation must be objects.")
+    version = summary.get("format_version")
+    qualified = generation.get("qualified_statements")
+    representation = metadata.get("representation")
+    if version == "candidate-facts-bundle-v2":
+        if representation != REPRESENTATION or qualified is not True:
+            raise ValueError("Bundle v2 requires matching qualified representation.")
+    elif version in (None, "candidate-facts-bundle-v1"):
+        if representation is not None or (
+            qualified is not None and qualified is not False
+        ):
+            raise ValueError(
+                "Legacy bundle version cannot declare qualified representation."
+            )
+    else:
+        raise ValueError("Unsupported candidate bundle version.")
+    try:
+        prepared = prepare_rdf_input(files["base.ttl"])
+        statements = (
+            prepare_candidate_statements(facts)
+            if version == "candidate-facts-bundle-v2"
+            else None
+        )
+        expected = (
+            statements.prepared
+            if statements is not None
+            else prepare_rdf_input(RDFExporter().export_to_rdf(deepcopy(facts)))
+        )
+    except (ValidationError, KeyError, TypeError) as error:
+        raise ValueError(
+            "Bundle facts or base RDF do not match its representation."
+        ) from error
+    if prepared.sha256 != expected.sha256:
+        raise ValueError("Bundle representation does not match facts and base RDF.")
+    if statements is not None:
+        _validate_qualified_ontology_inputs(ontology, statements)
     return files
 
 
@@ -199,10 +255,18 @@ def build_candidate_graph(
     are retained in graph metadata alongside the original RDF hash.
     """
     prepared = prepare_rdf_input(base_rdf)
-    exported = prepare_rdf_input(RDFExporter().export_to_rdf(deepcopy(facts)))
+    qualified = (ontology.get("metadata") or {}).get("representation") == REPRESENTATION
+    statements = prepare_candidate_statements(facts) if qualified else None
+    exported = (
+        statements.prepared
+        if statements is not None
+        else prepare_rdf_input(RDFExporter().export_to_rdf(deepcopy(facts)))
+    )
     if prepared.sha256 != exported.sha256:
         raise ValueError("Candidate facts do not match the supplied base RDF.")
-    graph = prepared.graph
+    if statements is not None:
+        _validate_qualified_ontology_inputs(ontology, statements)
+    graph = statements.projection.graph if statements is not None else prepared.graph
     if any(isinstance(term, BNode) for triple in graph for term in triple):
         raise ValueError("Candidate bundle projection requires named RDF resources.")
     schema_nodes, schema_edges = _ontology_projection(ontology, graph)
@@ -363,7 +427,7 @@ def build_candidate_graph(
         identifier = iri(entity["id"], namespaces)
         for evidence_id in citations(entity):
             add_edge(identifier, "hasEvidence", evidence_id)
-    for relationship in facts.get("relationships", []):
+    for index, relationship in enumerate(facts.get("relationships", [])):
         source = iri(
             relationship.get("source_id") or relationship.get("source"), namespaces
         )
@@ -390,6 +454,8 @@ def build_candidate_graph(
         # extraction's qualifiers bound to its own citations when that same
         # statement occurs in multiple independently qualified assertions.
         assertion = {**deepcopy(qualifiers), "evidence_ids": sorted(references)}
+        if statements is not None:
+            assertion["assertion_id"] = statements.assertion_ids[index]
         assertions = edge["properties"].setdefault("candidate_assertions", [])
         if assertion not in assertions:
             assertions.append(assertion)
@@ -403,8 +469,12 @@ def build_candidate_graph(
             **_STATUS,
             "rdf_literals": literal_records,
             "provenance_overlay": {
-                "included_in_base_rdf": False,
-                "description": "Evidence, source documents, candidate status and relationship qualifiers are viewer metadata; base.ttl is the exported RDF.",
+                "included_in_base_rdf": qualified,
+                "description": (
+                    "Business relationship edges display qualified candidate assertions from base.ttl; they are not unconditional facts. Evidence and qualifiers are included in that authoritative RDF."
+                    if qualified
+                    else "Evidence, source documents, candidate status and relationship qualifiers are viewer metadata; base.ttl is the exported RDF."
+                ),
             },
         },
     }

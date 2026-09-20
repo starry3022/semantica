@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "source_id": "legacy-policy",
+      "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+      "path": "source.txt",
+      "title": "旧版重放夹具",
+      "version": "v1"
+    }
+  ]
+}

@@ -23,8 +23,13 @@ from semantica.explorer.candidate_bundle import (
 from semantica.export.rdf_exporter import RDFExporter
 from semantica.ontology.candidate_ontology import (
     CANDIDATE_PROMPT_VERSION,
+    QUALIFIED_CANDIDATE_PROMPT_VERSION,
     build_candidate_prompt,
     normalize_candidate_ontology,
+)
+from semantica.ontology.candidate_statements import (
+    prepare_candidate_statements,
+    validate_candidate_statements,
 )
 from semantica.ontology.engine import OntologyEngine
 from semantica.ontology.llm_generator import GENERATION_OPTIONS
@@ -37,7 +42,8 @@ from semantica.semantic_extract.candidate_profile import (
 )
 
 
-BUNDLE_VERSION = "candidate-facts-bundle-v1"
+BUNDLE_VERSION = "candidate-facts-bundle-v2"
+LEGACY_BUNDLE_VERSION = "candidate-facts-bundle-v1"
 
 
 class ExportError(ValueError):
@@ -88,11 +94,16 @@ def _read_config(path):
 
 def _replay_ontology(saved, facts, options, rdf_hash, prompt_hash):
     metadata = saved.get("metadata", {})
+    prompt_version = (
+        QUALIFIED_CANDIDATE_PROMPT_VERSION
+        if options.get("qualified_statements")
+        else CANDIDATE_PROMPT_VERSION
+    )
     if (
         metadata.get("source") != "llm"
         or metadata.get("input_rdf_sha256") != rdf_hash
         or metadata.get("prompt_sha256") != prompt_hash
-        or metadata.get("prompt_version") != CANDIDATE_PROMPT_VERSION
+        or metadata.get("prompt_version") != prompt_version
         or any(
             not isinstance(metadata.get(key), str) or not metadata[key].strip()
             for key in ("provider", "model")
@@ -120,6 +131,7 @@ def run(args):
     output = args.output.absolute()
     _check_output(output)
     saved_files = None
+    bundle_version = BUNDLE_VERSION
     if args.replay:
         if any(
             getattr(args, key, None) is not None
@@ -138,7 +150,8 @@ def run(args):
             )
         saved_files = read_candidate_bundle(args.replay)
         previous = json.loads(saved_files["SUMMARY.json"])
-        if previous.get("format_version") != BUNDLE_VERSION:
+        bundle_version = previous.get("format_version")
+        if bundle_version not in {BUNDLE_VERSION, LEGACY_BUNDLE_VERSION}:
             raise ExportError(
                 "Replay requires a candidate-facts bundle of this version."
             )
@@ -183,6 +196,7 @@ def run(args):
         options = {
             "name": args.name or "CandidateOntology",
             "base_uri": args.base_uri or "https://semantica.dev/ontology/",
+            "qualified_statements": True,
         }
         extracted = extract_candidate_facts(
             source_bytes.decode("utf-8"), source_id=args.source_id, **config
@@ -194,7 +208,13 @@ def run(args):
         raise ExportError(
             "No candidate entities were extracted; no ontology bundle was published."
         )
-    base_rdf = RDFExporter().export_to_rdf(facts, format="turtle")
+    qualified = options.get("qualified_statements") is True
+    statements = prepare_candidate_statements(facts) if qualified else None
+    base_rdf = (
+        statements.rdf
+        if statements is not None
+        else RDFExporter().export_to_rdf(facts, format="turtle")
+    )
     rdf_hash = prepare_rdf_input(base_rdf).sha256
     prompt = build_candidate_prompt(facts, **options)
     if saved_files is not None:
@@ -210,7 +230,20 @@ def run(args):
             facts, method="llm", **options
         )
     engine = OntologyEngine(provider=None)
-    report = engine.validate_graph(base_rdf, ontology=ontology)
+    # SHACL describes business types, so it runs on a temporary vocabulary
+    # projection. Reification transport triples are not business observations.
+    report = engine.validate_graph(
+        statements.projection.canonical_ntriples if statements else base_rdf,
+        ontology=ontology,
+    )
+    issues = report.to_dict()
+    preservation = None
+    if qualified:
+        preservation = validate_candidate_statements(base_rdf, facts)
+        if not preservation["conforms"]:
+            raise ExportError("Qualified RDF did not preserve its candidate facts.")
+        issues["scope"] = "business_projection_schema"
+        issues["authoritative_rdf_sha256"] = rdf_hash
     source_manifest = {
         "sources": [
             {
@@ -240,11 +273,23 @@ def run(args):
         .generate_owl(ontology, format="turtle")
         .encode("utf-8"),
         "shapes.ttl": engine.to_shacl(ontology).encode("utf-8"),
-        "issues.json": _json_bytes(report.to_dict()),
+        "issues.json": _json_bytes(issues),
         "candidate-graph.json": _json_bytes(graph),
     }
+    if preservation is not None:
+        files["preservation.json"] = _json_bytes(preservation)
+    if saved_files is not None:
+        for name in (
+            "entity-prompt.txt",
+            "relationship-prompt.txt",
+            "ontology-prompt.txt",
+        ):
+            if saved_files.get(name) != files[name]:
+                raise ExportError(
+                    "Replay prompt artifacts differ from their recorded inputs."
+                )
     summary = {
-        "format_version": BUNDLE_VERSION,
+        "format_version": bundle_version,
         "mode": mode,
         "source": source,
         "generation": options,
@@ -266,6 +311,18 @@ def run(args):
         ],
         "files": {name: _digest(value) for name, value in files.items()},
     }
+    if qualified:
+        summary.update(
+            validation_scope="business_projection_schema",
+            preservation_conforms=preservation["conforms"],
+            input_facts_sha256=statements.facts_sha256,
+        )
+        summary["limitations"][1] = (
+            "base.ttl preserves qualified candidate statements, source evidence and metadata; "
+            "display edges and SHACL use an internal business projection. Preservation compares "
+            "against the same extracted facts and cannot detect facts the model omitted. "
+            "Schema conformance does not prove independent business completeness."
+        )
     files["SUMMARY.json"] = _json_bytes(summary)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(

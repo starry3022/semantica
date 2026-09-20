@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+from pathlib import Path
 import shutil
 
 import pytest
@@ -498,3 +499,257 @@ def test_merged_spo_preserves_each_assertions_qualifiers_and_own_evidence():
         for assertion in assertions
         for evidence_id in assertion["evidence_ids"]
     }
+
+
+def _qualified_inputs():
+    from semantica.ontology.candidate_statements import (
+        REPRESENTATION,
+        prepare_candidate_statements,
+    )
+
+    _, ontology, facts, manifest = _inputs()
+    first = facts["relationships"][0]
+    first["id"] = "urn:example:assertion:one"
+    first["metadata"]["condition"] = "加急申请"
+    second = copy.deepcopy(first)
+    second["id"] = "urn:example:assertion:two"
+    facts["relationships"].append(second)
+    ontology["metadata"]["representation"] = REPRESENTATION
+    statements = prepare_candidate_statements(facts)
+    ontology["metadata"].update(
+        input_rdf_sha256=statements.prepared.sha256,
+        input_facts_sha256=statements.facts_sha256,
+        projection_rdf_sha256=statements.projection.sha256,
+    )
+    return statements.rdf, ontology, facts, manifest
+
+
+def _set_bundle_declarations(path, *, version, qualified=None, representation=None):
+    ontology = json.loads((path / "ontology.json").read_bytes())
+    if representation is None:
+        ontology["metadata"].pop("representation", None)
+    else:
+        ontology["metadata"]["representation"] = representation
+    (path / "ontology.json").write_text(json.dumps(ontology, ensure_ascii=False))
+    _rehash(path)
+    summary = json.loads((path / "SUMMARY.json").read_bytes())
+    if version is None:
+        summary.pop("format_version")
+    else:
+        summary["format_version"] = version
+    if qualified is not None:
+        summary["generation"] = {"qualified_statements": qualified}
+    (path / "SUMMARY.json").write_text(json.dumps(summary))
+
+
+def test_v1_golden_projection_remains_identical():
+    from semantica.explorer.candidate_bundle import (
+        build_candidate_graph,
+        read_candidate_bundle,
+    )
+
+    fixture = Path(__file__).parents[1] / "fixtures" / "candidate_bundle_v1"
+    files = read_candidate_bundle(fixture)
+    graph = build_candidate_graph(
+        files["base.ttl"].decode(),
+        json.loads(files["ontology.json"]),
+        json.loads(files["facts.json"]),
+        json.loads(files["source-manifest.json"]),
+    )
+    assert graph == json.loads(files["candidate-graph.json"])
+
+
+def test_v2_projection_uses_authoritative_hash_and_keeps_distinct_assertion_ids():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_statements import prepare_candidate_statements
+
+    rdf, ontology, facts, manifest = _qualified_inputs()
+    prepared = prepare_candidate_statements(facts)
+    before = copy.deepcopy((ontology, facts, manifest))
+    graph = build_candidate_graph(rdf, ontology, facts, manifest)
+    assert (ontology, facts, manifest) == before
+    assert graph["metadata"]["input_rdf_sha256"] == prepared.prepared.sha256
+    assert graph["metadata"]["input_rdf_sha256"] != prepared.projection.sha256
+    overlay = graph["metadata"]["provenance_overlay"]
+    assert overlay["included_in_base_rdf"] is True
+    assert "qualified" in overlay["description"]
+    assert "not unconditional" in overlay["description"]
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert nodes[ALICE]["type"] == NS + "FinanceOfficer"
+    assert nodes[PAYMENT]["type"] == NS + "Payment"
+    edges = [edge for edge in graph["edges"] if edge["type"] == NS + "reviews"]
+    assert len(edges) == 1
+    assertions = edges[0]["properties"]["candidate_assertions"]
+    assert [entry["assertion_id"] for entry in assertions] == [
+        "urn:example:assertion:one",
+        "urn:example:assertion:two",
+    ]
+    assert [entry["assertion_id"] for entry in assertions] == prepared.assertion_ids
+    assert assertions[0]["evidence_ids"] == assertions[1]["evidence_ids"]
+    assert len(assertions[0]["evidence_ids"]) == 1
+
+
+def test_v2_assertions_keep_their_own_evidence_when_sharing_a_display_edge(tmp_path):
+    from semantica.explorer.candidate_bundle import create_bundle_app
+    from semantica.ontology.candidate_statements import (
+        REPRESENTATION,
+        prepare_candidate_statements,
+    )
+
+    _, ontology, facts, manifest = _qualified_inputs()
+    second = facts["relationships"][1]
+    second["metadata"]["condition"] = "普通申请"
+    quote = second["metadata"]["evidence"][0]["quote"]
+    second["metadata"]["evidence"][0].update(
+        start_char=TEXT.index(quote), end_char=TEXT.index(quote) + len(quote)
+    )
+    statements = prepare_candidate_statements(facts)
+    rdf = statements.rdf
+    ontology["metadata"].update(
+        input_rdf_sha256=statements.prepared.sha256,
+        input_facts_sha256=statements.facts_sha256,
+        projection_rdf_sha256=statements.projection.sha256,
+    )
+    bundle = tmp_path / "v2"
+    graph = _write_bundle(bundle, inputs=(rdf, ontology, facts, manifest))
+    _set_bundle_declarations(
+        bundle,
+        version="candidate-facts-bundle-v2",
+        qualified=True,
+        representation=REPRESENTATION,
+    )
+    edge = next(edge for edge in graph["edges"] if edge["type"] == NS + "reviews")
+    assertions = edge["properties"]["candidate_assertions"]
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert [entry["condition"] for entry in assertions] == ["加急申请", "普通申请"]
+    assert [
+        nodes[entry["evidence_ids"][0]]["properties"]["start_char"]
+        for entry in assertions
+    ] == [TEXT.rindex(quote), TEXT.index(quote)]
+    with TestClient(create_bundle_app(bundle)) as client:
+        view = client.get("/api/sources/view", params={"edge_id": edge["id"]}).json()
+    assert len(view["evidence"]) == 2
+    assert {entry["status"] for entry in view["evidence"]} == {"aligned"}
+
+
+@pytest.mark.parametrize(
+    ("version", "qualified", "representation"),
+    [
+        ("candidate-facts-bundle-v2", None, None),
+        ("candidate-facts-bundle-v2", True, None),
+        ("candidate-facts-bundle-v2", False, "qualified_candidate_statements_v1"),
+        ("candidate-facts-bundle-v2", None, "qualified_candidate_statements_v1"),
+        ("candidate-facts-bundle-v1", True, None),
+        ("candidate-facts-bundle-v1", None, "qualified_candidate_statements_v1"),
+        (None, True, "qualified_candidate_statements_v1"),
+        ("candidate-facts-bundle-v99", None, None),
+    ],
+)
+def test_bundle_rejects_inconsistent_version_and_representation_declarations(
+    tmp_path, version, qualified, representation
+):
+    from semantica.explorer.candidate_bundle import read_candidate_bundle
+
+    bundle = tmp_path / "inconsistent"
+    _write_bundle(bundle)
+    _set_bundle_declarations(
+        bundle, version=version, qualified=qualified, representation=representation
+    )
+    with pytest.raises(ValueError, match="version|representation|qualified"):
+        read_candidate_bundle(bundle)
+
+
+def test_unversioned_native_bundle_remains_readable(tmp_path):
+    from semantica.explorer.candidate_bundle import read_candidate_bundle
+
+    bundle = tmp_path / "legacy"
+    _write_bundle(bundle)
+    _set_bundle_declarations(bundle, version=None)
+    assert read_candidate_bundle(bundle)["source.txt"] == TEXT.encode()
+
+
+@pytest.mark.parametrize("version", [None, "candidate-facts-bundle-v1"])
+def test_v2_rdf_cannot_be_disguised_as_legacy_by_removing_declarations(
+    tmp_path, version
+):
+    from semantica.explorer.candidate_bundle import read_candidate_bundle
+
+    bundle = tmp_path / "disguised"
+    _write_bundle(bundle)
+    rdf, _, facts, _ = _qualified_inputs()
+    (bundle / "base.ttl").write_text(rdf)
+    (bundle / "facts.json").write_text(json.dumps(facts, ensure_ascii=False))
+    _set_bundle_declarations(bundle, version=version)
+    with pytest.raises(ValueError, match="base RDF|representation|qualified"):
+        read_candidate_bundle(bundle)
+
+
+def test_v2_declaration_cannot_wrap_an_unqualified_native_base(tmp_path):
+    from semantica.explorer.candidate_bundle import read_candidate_bundle
+
+    bundle = tmp_path / "false-v2"
+    _write_bundle(bundle)
+    _set_bundle_declarations(
+        bundle,
+        version="candidate-facts-bundle-v2",
+        qualified=True,
+        representation="qualified_candidate_statements_v1",
+    )
+    with pytest.raises(ValueError, match="base RDF|representation|qualified"):
+        read_candidate_bundle(bundle)
+
+
+def test_v2_projection_rejects_native_base_and_rehashed_qualifier_drift():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+
+    rdf, ontology, facts, manifest = _qualified_inputs()
+    native = RDFExporter().export_to_rdf(facts)
+    with pytest.raises(ValueError, match="facts.*base RDF"):
+        build_candidate_graph(native, ontology, facts, manifest)
+    facts["relationships"][0]["metadata"]["condition"] = "其他条件"
+    with pytest.raises(ValueError, match="facts.*base RDF"):
+        build_candidate_graph(rdf, ontology, facts, manifest)
+
+
+@pytest.mark.parametrize(
+    "field", ["input_rdf_sha256", "input_facts_sha256", "projection_rdf_sha256"]
+)
+@pytest.mark.parametrize("remove", [False, True])
+def test_v2_rejects_missing_or_changed_ontology_input_bindings(tmp_path, field, remove):
+    from semantica.explorer.candidate_bundle import (
+        build_candidate_graph,
+        read_candidate_bundle,
+    )
+    from semantica.ontology.candidate_statements import REPRESENTATION
+
+    inputs = _qualified_inputs()
+    rdf, ontology, facts, manifest = inputs
+    bundle = tmp_path / "binding-drift"
+    _write_bundle(bundle, inputs=inputs)
+    if remove:
+        del ontology["metadata"][field]
+    else:
+        ontology["metadata"][field] = "0" * 64
+    (bundle / "ontology.json").write_text(json.dumps(ontology, ensure_ascii=False))
+    _set_bundle_declarations(
+        bundle,
+        version="candidate-facts-bundle-v2",
+        qualified=True,
+        representation=REPRESENTATION,
+    )
+    with pytest.raises(ValueError, match="ontology.*(input|binding)"):
+        build_candidate_graph(rdf, ontology, facts, manifest)
+    with pytest.raises(ValueError, match="ontology.*(input|binding)"):
+        read_candidate_bundle(bundle)
+
+
+def test_v2_rejects_changed_facts_and_base_when_ontology_still_binds_old_inputs():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_statements import prepare_candidate_statements
+
+    _, ontology, facts, manifest = _qualified_inputs()
+    facts["relationships"][0]["metadata"]["condition"] = "改后的条件"
+    updated = prepare_candidate_statements(facts)
+    assert ontology["metadata"]["projection_rdf_sha256"] == updated.projection.sha256
+    with pytest.raises(ValueError, match="ontology.*(input|binding)"):
+        build_candidate_graph(updated.rdf, ontology, facts, manifest)

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import hashlib
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,78 @@ from semantica.utils.exceptions import ProcessingError, ValidationError
 EX = "https://example.test/vocab#"
 SEM = "https://semantica.dev/ns#"
 ORG = "urn:example:Organization"
+
+
+def qualified_facts():
+    data = facts()
+    data["relationships"][0]["id"] = "urn:example:assertion"
+    data["relationships"][0]["metadata"] = {
+        "condition": "完成后的三个工作日内",
+        "modality": "必须补齐",
+        "negation": False,
+        "evidence": [{"quote": "必须补齐", "start_char": 0, "end_char": 4}],
+    }
+    return data
+
+
+def test_qualified_prompt_contains_complete_facts_without_transport_vocabulary():
+    from semantica.ontology.candidate_statements import prepare_candidate_statements
+
+    data = qualified_facts()
+    prompt = build_candidate_prompt(data, qualified_statements=True)
+    payload = json.loads(prompt.split("INPUT:\n", 1)[1])
+    statements = prepare_candidate_statements(data)
+    assert payload["candidate_facts"] == data
+    assert payload["input_rdf_sha256"] == statements.prepared.sha256
+    assert payload["input_facts_sha256"] == statements.facts_sha256
+    assert set(payload["observed_vocabulary"]["classes"]) == {EX + "PERSON", ORG}
+    assert str(RDF.Statement) not in payload["observed_vocabulary"]["classes"]
+    assert str(RDF.subject) not in payload["observed_vocabulary"]["properties"]
+    assert "unconditional" in prompt
+    assert "candidate-facts-ontology-v3" in prompt
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("condition", "五个工作日内"), ("modality", "可以"), ("negation", True), ("evidence", [])],
+)
+def test_qualified_replay_rejects_changed_context_even_when_vocabulary_is_equal(
+    field, value
+):
+    data = qualified_facts()
+    result = generate_candidate_ontology(
+        data, llm(proposal()), qualified_statements=True
+    )
+    changed = deepcopy(data)
+    changed["relationships"][0]["metadata"][field] = value
+    assert build_candidate_prompt(
+        data, qualified_statements=True
+    ) != build_candidate_prompt(changed, qualified_statements=True)
+    with pytest.raises(ValidationError, match="matching|context"):
+        normalize_candidate_ontology(result, changed, qualified_statements=True)
+
+
+def test_qualified_generation_binds_authoritative_graph_and_replays_exactly():
+    from semantica.ontology.candidate_statements import (
+        REPRESENTATION,
+        prepare_candidate_statements,
+    )
+
+    data = qualified_facts()
+    generator = llm(proposal())
+    result = generate_candidate_ontology(data, generator, qualified_statements=True)
+    prepared = prepare_candidate_statements(data)
+    assert result["metadata"]["representation"] == REPRESENTATION
+    assert result["metadata"]["input_rdf_sha256"] == prepared.prepared.sha256
+    assert result["metadata"]["input_facts_sha256"] == prepared.facts_sha256
+    assert result["metadata"]["projection_rdf_sha256"] == prepared.projection.sha256
+    assert result == normalize_candidate_ontology(
+        result, data, qualified_statements=True
+    )
+    assert (
+        "qualified_statements"
+        not in generator.provider.generate_structured.call_args.kwargs
+    )
 
 
 def facts():

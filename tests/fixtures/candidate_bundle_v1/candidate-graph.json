@@ -1,0 +1,317 @@
+{
+  "nodes": [
+    {
+      "id": "https://example.test/candidate/",
+      "type": "owl:Ontology",
+      "content": "LegacyCandidate",
+      "properties": {
+        "rdfs:label": "LegacyCandidate",
+        "rdfs:comment": "",
+        "uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "https://semantica.dev/ns#ApprovalRole",
+      "type": "owl:Class",
+      "content": "候选类别",
+      "properties": {
+        "rdfs:label": "候选类别",
+        "rdfs:comment": "制度中的候选类别",
+        "uri": "https://semantica.dev/ns#ApprovalRole",
+        "scheme_uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "https://semantica.dev/ns#PaymentRequest",
+      "type": "owl:Class",
+      "content": "候选类别",
+      "properties": {
+        "rdfs:label": "候选类别",
+        "rdfs:comment": "制度中的候选类别",
+        "uri": "https://semantica.dev/ns#PaymentRequest",
+        "scheme_uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "https://semantica.dev/ns#approves",
+      "type": "owl:ObjectProperty",
+      "content": "候选属性",
+      "properties": {
+        "rdfs:label": "候选属性",
+        "rdfs:comment": "制度中的候选属性",
+        "uri": "https://semantica.dev/ns#approves",
+        "scheme_uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "https://semantica.dev/ns#confidence",
+      "type": "owl:DatatypeProperty",
+      "content": "候选属性",
+      "properties": {
+        "rdfs:label": "候选属性",
+        "rdfs:comment": "制度中的候选属性",
+        "uri": "https://semantica.dev/ns#confidence",
+        "scheme_uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "https://semantica.dev/ns#text",
+      "type": "owl:DatatypeProperty",
+      "content": "候选属性",
+      "properties": {
+        "rdfs:label": "候选属性",
+        "rdfs:comment": "制度中的候选属性",
+        "uri": "https://semantica.dev/ns#text",
+        "scheme_uri": "https://example.test/candidate/",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "type": "https://semantica.dev/ns#ApprovalRole",
+      "content": "财务主管",
+      "properties": {
+        "rdf:type": [
+          "https://semantica.dev/ns#ApprovalRole"
+        ],
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "https://semantica.dev/ns#confidence": "0.9",
+        "https://semantica.dev/ns#text": "财务主管"
+      }
+    },
+    {
+      "id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "type": "https://semantica.dev/ns#PaymentRequest",
+      "content": "付款申请",
+      "properties": {
+        "rdf:type": [
+          "https://semantica.dev/ns#PaymentRequest"
+        ],
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "https://semantica.dev/ns#confidence": "0.9",
+        "https://semantica.dev/ns#text": "付款申请"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6",
+      "type": "Evidence",
+      "content": "单笔金额不足9000元时，财务主管应提前审批付款申请。",
+      "properties": {
+        "start_line": 1,
+        "end_line": 1,
+        "quote": "单笔金额不足9000元时，财务主管应提前审批付款申请。",
+        "start_char": 0,
+        "end_char": 27,
+        "source_id": "legacy-policy",
+        "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+        "span_origin": "program_from_selected_lines",
+        "status": "citation_aligned",
+        "message": "Exact source lines selected by the model; quote and Unicode offsets computed by the program. This is not business approval.",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:source:2680c6c55ba13b401b728cc627f0c10247b6f63ac75b39e9b408ac7fa401d3d8",
+      "type": "SourceDocument",
+      "content": "旧版重放夹具",
+      "properties": {
+        "source_id": "legacy-policy",
+        "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "urn:semantica:viewer:edge:00a5f7cb618aa2f65e29edf4a71b44553377fa1e0eb620db64ae40dc5c7e3fff",
+      "source": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "target": "https://semantica.dev/ns#ApprovalRole",
+      "type": "rdf:type",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:17ab96826214a7c3e4cb9cbfbfa784be576b8f56e8b6dce15bf4450a74e46db1",
+      "source": "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6",
+      "target": "urn:semantica:viewer:source:2680c6c55ba13b401b728cc627f0c10247b6f63ac75b39e9b408ac7fa401d3d8",
+      "type": "fromSource",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:2b69e7c5a32f2210bab335093e2a7d49ab26417065db26dd6f3d78a14cdab5d7",
+      "source": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "target": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "type": "https://semantica.dev/ns#approves",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "evidence_ids": [
+          "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6"
+        ],
+        "candidate_assertions": [
+          {
+            "source_id": "legacy-policy",
+            "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+            "provider": "openai",
+            "model": "legacy-fixture",
+            "extraction_method": "llm_typed",
+            "extraction_profile": "candidate_facts",
+            "prompt_version": "candidate-facts-extraction-v3",
+            "candidate_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:relationship:c87630f900b7b4ace86e6f612294bf1a71edceb67a72ff5a1f3b765800473c6b",
+            "condition": "单笔金额不足9000元时",
+            "negation": null,
+            "modality": "应提前",
+            "evidence_ids": [
+              "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:4b13d11d489b2196cd264b8a572d61d6a3fe51c966f3391bd5798b4f926e0fdb",
+      "source": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "target": "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6",
+      "type": "hasEvidence",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:56924dced2d1e2b7b27a7567e4cafd8e571b4aae5414a2108111abc3bca84823",
+      "source": "https://semantica.dev/ns#approves",
+      "target": "https://semantica.dev/ns#PaymentRequest",
+      "type": "rdfs:range",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:5837f99c5a17a04a65567521f329ab188cafd4ea0909cbc016cb0d052670efbe",
+      "source": "https://semantica.dev/ns#confidence",
+      "target": "http://www.w3.org/2001/XMLSchema#decimal",
+      "type": "rdfs:range",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:7a32055835cc4da51ec5a38aa7faf8a2b913b931cc415c0e3d60b53b3dca76a0",
+      "source": "https://semantica.dev/ns#approves",
+      "target": "https://semantica.dev/ns#ApprovalRole",
+      "type": "rdfs:domain",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:8c8178b1793cd6d421a3d2e5c963235c1bde357e67bc196441e91912ad537932",
+      "source": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "target": "https://semantica.dev/ns#PaymentRequest",
+      "type": "rdf:type",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:e1c09a4dec54fbf90c7b2358f4bb95448ec7a7ed8a413520cc9a6d45e5fb01cd",
+      "source": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "target": "urn:semantica:viewer:evidence:06614035e9e9d204b39e62af69937e71184e575b18a7a3ad3e4dd01f28b4e6a6",
+      "type": "hasEvidence",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    },
+    {
+      "id": "urn:semantica:viewer:edge:e51f55f45924fd9f7cfdb54325ff6a17cc097c7f3b439b81a14981a254a1d018",
+      "source": "https://semantica.dev/ns#text",
+      "target": "http://www.w3.org/2001/XMLSchema#string",
+      "type": "rdfs:range",
+      "weight": 1.0,
+      "properties": {
+        "fact_status": "candidate",
+        "review_status": "unreviewed"
+      }
+    }
+  ],
+  "metadata": {
+    "input_kind": "candidate_facts",
+    "input_rdf_sha256": "83387b94dc28486d9a75d36686f29f9a0e46035b722fb44f2c1ec41b7915ef70",
+    "ontology_uri": "https://example.test/candidate/",
+    "fact_status": "candidate",
+    "review_status": "unreviewed",
+    "rdf_literals": {
+      "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa": {
+        "https://semantica.dev/ns#confidence": [
+          {
+            "value": "0.9",
+            "datatype": "http://www.w3.org/2001/XMLSchema#decimal",
+            "language": null
+          }
+        ],
+        "https://semantica.dev/ns#text": [
+          {
+            "value": "财务主管",
+            "datatype": null,
+            "language": null
+          }
+        ]
+      },
+      "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb": {
+        "https://semantica.dev/ns#confidence": [
+          {
+            "value": "0.9",
+            "datatype": "http://www.w3.org/2001/XMLSchema#decimal",
+            "language": null
+          }
+        ],
+        "https://semantica.dev/ns#text": [
+          {
+            "value": "付款申请",
+            "datatype": null,
+            "language": null
+          }
+        ]
+      }
+    },
+    "provenance_overlay": {
+      "included_in_base_rdf": false,
+      "description": "Evidence, source documents, candidate status and relationship qualifiers are viewer metadata; base.ttl is the exported RDF."
+    }
+  }
+}

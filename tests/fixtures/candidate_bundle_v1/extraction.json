@@ -1,0 +1,75 @@
+{
+  "profile": "candidate_facts",
+  "prompt_version": "candidate-facts-extraction-v3",
+  "provider": "openai",
+  "model": "legacy-fixture",
+  "source_id": "legacy-policy",
+  "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+  "response_format": "typed_model_json",
+  "responses": {
+    "entities": {
+      "entities": [
+        {
+          "id": "e1",
+          "text": "财务主管",
+          "type": "ApprovalRole",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "start_line": 1,
+              "end_line": 1,
+              "quote": null,
+              "start_char": null,
+              "end_char": null
+            }
+          ]
+        },
+        {
+          "id": "e2",
+          "text": "付款申请",
+          "type": "PaymentRequest",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "start_line": 1,
+              "end_line": 1,
+              "quote": null,
+              "start_char": null,
+              "end_char": null
+            }
+          ]
+        }
+      ]
+    },
+    "relationships": {
+      "relationships": [
+        {
+          "source_id": "e1",
+          "target_id": "e2",
+          "type": "approves",
+          "confidence": 0.9,
+          "condition": "单笔金额不足9000元时",
+          "negation": null,
+          "modality": "应提前",
+          "evidence": [
+            {
+              "start_line": 1,
+              "end_line": 1,
+              "quote": null,
+              "start_char": null,
+              "end_char": null
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "response_status": {
+    "entities": "generated",
+    "relationships": "generated"
+  },
+  "prompt_sha256": {
+    "entities": "7e64bc4291dc4700b294a2e63762727b63e94e851680032ceff3cd4ee05a4492",
+    "relationships": "8e5bbb84ba5674388ea0370f6213e19912587108d0721ebc6376b4fc9a3f1d93"
+  }
+}

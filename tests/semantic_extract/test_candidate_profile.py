@@ -3,6 +3,7 @@
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -429,7 +430,7 @@ def test_prompts_cover_substantive_unnamed_referents_and_use_line_selection():
     assert "requests, activities, resources and document requirements" in entity_prompt
     assert "start_line" in entity_prompt and "end_line" in entity_prompt
     assert "Do not substitute a section heading" in relation_prompt
-    assert result["extraction"]["prompt_version"] == "candidate-facts-extraction-v3"
+    assert result["extraction"]["prompt_version"] == "candidate-facts-extraction-v4"
 
 
 def test_saved_prompts_include_actual_schema_and_match_first_provider_requests():
@@ -482,3 +483,201 @@ def test_manual_provider_gets_evidence_array_schema_on_first_attempt_without_ins
         assert "RESPONSE_SCHEMA_JSON:" in call.args[0]
         assert "evidence MUST be an array" in call.args[0]
     assert len(result["facts"]["relationships"]) == 1
+
+
+@pytest.fixture
+def legacy_v3():
+    fixture = Path(__file__).parent / "fixtures" / "candidate_profile_v3.json"
+    return json.loads(fixture.read_text(encoding="utf-8"))
+
+
+def test_v3_golden_replay_keeps_exact_prompts_schemas_facts_and_evidence(legacy_v3):
+    with patch(
+        "semantica.semantic_extract.candidate_profile.create_provider",
+        side_effect=AssertionError("offline replay initialized a provider"),
+    ):
+        replayed = replay_candidate_facts(
+            legacy_v3["source"],
+            legacy_v3["extraction"],
+            source_id=legacy_v3["extraction"]["source_id"],
+        )
+    assert replayed["extraction"] == legacy_v3["extraction"]
+    assert replayed["prompts"] == legacy_v3["prompts"]
+    assert replayed["issues"] == legacy_v3["issues"]
+    serialized = json.dumps(
+        replayed["facts"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert hashlib.sha256(serialized.encode()).hexdigest() == legacy_v3["facts_sha256"]
+
+
+@pytest.fixture
+def current_from_v3_responses(legacy_v3):
+    provider = MagicMock()
+    provider.is_available.return_value = True
+    provider.generate_typed.side_effect = [
+        legacy_v3["extraction"]["responses"][phase]
+        for phase in ("entities", "relationships")
+    ]
+    with patch(
+        "semantica.semantic_extract.candidate_profile.create_provider",
+        return_value=provider,
+    ):
+        return extract_candidate_facts(
+            legacy_v3["source"],
+            source_id=legacy_v3["extraction"]["source_id"],
+            provider=legacy_v3["extraction"]["provider"],
+            model=legacy_v3["extraction"]["model"],
+        )
+
+
+def test_v4_changes_prompt_identity_but_not_response_identity_or_evidence(
+    legacy_v3, current_from_v3_responses
+):
+    result = current_from_v3_responses
+    assert result["extraction"]["prompt_version"] == "candidate-facts-extraction-v4"
+    for phase in ("entities", "relationships"):
+        assert (
+            result["extraction"]["prompt_sha256"][phase]
+            != (legacy_v3["extraction"]["prompt_sha256"][phase])
+        )
+        assert (
+            result["extraction"]["prompt_sha256"][phase]
+            == hashlib.sha256(result["prompts"][phase].encode()).hexdigest()
+        )
+    legacy_facts = deepcopy(result["facts"])
+    for fact in legacy_facts["entities"] + legacy_facts["relationships"]:
+        assert fact["metadata"]["prompt_version"] == "candidate-facts-extraction-v4"
+        fact["metadata"]["prompt_version"] = "candidate-facts-extraction-v3"
+    serialized = json.dumps(
+        legacy_facts, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert hashlib.sha256(serialized.encode()).hexdigest() == legacy_v3["facts_sha256"]
+    assert (
+        replay_candidate_facts(
+            legacy_v3["source"],
+            result["extraction"],
+            source_id=legacy_v3["extraction"]["source_id"],
+        )
+        == result
+    )
+
+
+@pytest.mark.parametrize("version", ["v3", "v4"])
+@pytest.mark.parametrize("phase", ["entities", "relationships"])
+def test_versioned_replay_rejects_tampered_or_cross_version_prompt_hashes(
+    legacy_v3, current_from_v3_responses, version, phase
+):
+    old = legacy_v3["extraction"]
+    new = current_from_v3_responses["extraction"]
+    original, other = (old, new) if version == "v3" else (new, old)
+    for wrong_hash in ("0" * 64, other["prompt_sha256"][phase]):
+        record = deepcopy(original)
+        record["prompt_sha256"][phase] = wrong_hash
+        with pytest.raises(ValidationError, match="provenance"):
+            replay_candidate_facts(
+                legacy_v3["source"], record, source_id=old["source_id"]
+            )
+
+
+@pytest.mark.parametrize("version", ["v3", "v4"])
+def test_versioned_replay_rejects_relabeling_and_unknown_versions(
+    legacy_v3, current_from_v3_responses, version
+):
+    old = legacy_v3["extraction"]
+    new = current_from_v3_responses["extraction"]
+    original, other = (old, new) if version == "v3" else (new, old)
+    for wrong_version in (
+        other["prompt_version"],
+        "candidate-facts-extraction-v99",
+        None,
+    ):
+        record = deepcopy(original)
+        record["prompt_version"] = wrong_version
+        with pytest.raises(ValidationError, match="provenance"):
+            replay_candidate_facts(
+                legacy_v3["source"], record, source_id=old["source_id"]
+            )
+
+
+def test_v4_preserves_cross_clause_evidence_exceptions_and_completion_deadlines():
+    text = (
+        "😀标准交接由协调员复核。\r\n"
+        "加急交接除前述要求外，还需要稽核员复核。\r\n"
+        "豁免交接无需稽核员复核。\r\n"
+        "交接完成后四个工作日内，必须补齐签收记录。"
+    )
+    raw = [
+        {
+            "entities": [
+                {
+                    "id": identifier,
+                    "text": label,
+                    "type": kind,
+                    "confidence": 0.9,
+                    "evidence": [{"start_line": line, "end_line": line}],
+                }
+                for identifier, label, kind, line in [
+                    ("e1", "交接", "HandoverRequirement", 1),
+                    ("e2", "协调员", "ReviewRole", 1),
+                    ("e3", "稽核员", "ReviewRole", 2),
+                    ("e4", "签收记录", "DocumentRequirement", 4),
+                ]
+            ]
+        },
+        {
+            "relationships": [
+                {
+                    "source_id": "e1",
+                    "target_id": "e2",
+                    "type": "requiresReviewBy",
+                    "confidence": 0.9,
+                    "condition": "加急交接",
+                    "negation": None,
+                    "modality": "还需要",
+                    "evidence": [
+                        {"start_line": 1, "end_line": 1},
+                        {"start_line": 2, "end_line": 2},
+                    ],
+                },
+                {
+                    "source_id": "e1",
+                    "target_id": "e3",
+                    "type": "requiresReviewBy",
+                    "confidence": 0.9,
+                    "condition": "豁免交接",
+                    "negation": True,
+                    "modality": "无需",
+                    "evidence": [{"start_line": 3, "end_line": 3}],
+                },
+                {
+                    "source_id": "e1",
+                    "target_id": "e4",
+                    "type": "mustCompleteAfterward",
+                    "confidence": 0.9,
+                    "condition": "交接完成后四个工作日内",
+                    "negation": None,
+                    "modality": "必须",
+                    "evidence": [{"start_line": 4, "end_line": 4}],
+                },
+            ]
+        },
+    ]
+    result = extract_for_text(text, raw)
+    assert result["extraction"]["prompt_version"] == "candidate-facts-extraction-v4"
+    inherited, exception, deadline = result["facts"]["relationships"]
+    assert inherited["metadata"]["condition"] == "加急交接"
+    assert [item["quote"] for item in inherited["metadata"]["evidence"]] == [
+        "😀标准交接由协调员复核。\r\n",
+        "加急交接除前述要求外，还需要稽核员复核。\r\n",
+    ]
+    assert exception["metadata"]["negation"] is True
+    assert exception["metadata"]["modality"] == "无需"
+    assert deadline["type"] == "mustCompleteAfterward"
+    assert deadline["metadata"]["condition"] == "交接完成后四个工作日内"
+    assert deadline["metadata"]["modality"] == "必须"
+    assert deadline["metadata"]["evidence"][0]["start_char"] == 50
+    assert deadline["metadata"]["evidence"][0]["end_char"] == len(text)
+    assert (
+        replay_candidate_facts(text, result["extraction"], source_id=SOURCE_ID)
+        == result
+    )

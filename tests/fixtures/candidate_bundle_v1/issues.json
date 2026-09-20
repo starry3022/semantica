@@ -1,0 +1,31 @@
+{
+  "conforms": true,
+  "violation_count": 0,
+  "warning_count": 0,
+  "violations": [],
+  "warnings": [],
+  "infos": [],
+  "coverage": {
+    "data_triple_count": 7,
+    "target_shape_count": 2,
+    "constraint_count": 1,
+    "focus_node_count": 2,
+    "constrained_focus_node_count": 1,
+    "target_resolution_complete": true,
+    "unmatched_target_classes": [],
+    "untargeted_data_classes": [],
+    "undeclared_predicates": [
+      "https://semantica.dev/ns#confidence",
+      "https://semantica.dev/ns#text"
+    ],
+    "unsupported_targets": [],
+    "evaluation_complete": true
+  },
+  "technical_issues": [
+    {
+      "code": "undeclared_predicates",
+      "severity": "info",
+      "message": "Some data predicates have no declared simple SHACL property path; other constraints may cover them."
+    }
+  ]
+}

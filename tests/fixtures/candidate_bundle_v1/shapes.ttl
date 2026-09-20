@@ -1,0 +1,25 @@
+@prefix ex: <https://semantica.dev/ns#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<https://semantica.dev/shapes/shapes> a owl:Ontology .
+
+<https://semantica.dev/shapes/ApprovalRoleShape>
+    a sh:NodeShape ;
+    sh:targetClass <https://semantica.dev/ns#ApprovalRole> ;
+    sh:name "候选类别" ;
+    sh:description "制度中的候选类别" ;
+    sh:property [
+        sh:path <https://semantica.dev/ns#approves> ;
+        sh:class <https://semantica.dev/ns#PaymentRequest> ;
+        sh:severity sh:Violation
+    ] .
+
+<https://semantica.dev/shapes/PaymentRequestShape>
+    a sh:NodeShape ;
+    sh:targetClass <https://semantica.dev/ns#PaymentRequest> ;
+    sh:name "候选类别" ;
+    sh:description "制度中的候选类别" .

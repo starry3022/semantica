@@ -1,0 +1,13 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix semantica: <https://semantica.dev/ns#> .
+
+<urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa> a <https://semantica.dev/ns#ApprovalRole> ;
+    semantica:text "财务主管" ;
+    semantica:confidence "0.9"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+
+<urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb> a <https://semantica.dev/ns#PaymentRequest> ;
+    semantica:text "付款申请" ;
+    semantica:confidence "0.9"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+
+<urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa> <https://semantica.dev/ns#approves> <urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb> .

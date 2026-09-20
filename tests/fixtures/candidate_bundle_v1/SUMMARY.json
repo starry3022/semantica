@@ -1,0 +1,67 @@
+{
+  "format_version": "candidate-facts-bundle-v1",
+  "mode": "llm",
+  "source": {
+    "source_id": "legacy-policy",
+    "sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+    "title": "旧版重放夹具",
+    "version": "v1"
+  },
+  "generation": {
+    "name": "LegacyCandidate",
+    "base_uri": "https://example.test/candidate/"
+  },
+  "fact_status": "candidate",
+  "review_status": "unreviewed",
+  "entities": 2,
+  "relationships": 1,
+  "classes": 2,
+  "properties": 3,
+  "input_rdf_sha256": "83387b94dc28486d9a75d36686f29f9a0e46035b722fb44f2c1ec41b7915ef70",
+  "conforms": true,
+  "coverage": {
+    "data_triple_count": 7,
+    "target_shape_count": 2,
+    "constraint_count": 1,
+    "focus_node_count": 2,
+    "constrained_focus_node_count": 1,
+    "target_resolution_complete": true,
+    "unmatched_target_classes": [],
+    "untargeted_data_classes": [],
+    "undeclared_predicates": [
+      "https://semantica.dev/ns#confidence",
+      "https://semantica.dev/ns#text"
+    ],
+    "unsupported_targets": [],
+    "evaluation_complete": true
+  },
+  "technical_issues": [
+    {
+      "code": "undeclared_predicates",
+      "severity": "info",
+      "message": "Some data predicates have no declared simple SHACL property path; other constraints may cover them."
+    }
+  ],
+  "extraction_issue_count": 0,
+  "limitations": [
+    "Model-proposed entities, types, relationships and definitions remain unreviewed; technical consistency does not prove business accuracy or completeness.",
+    "RDFExporter exports base entity/relation triples. Evidence and relation qualifiers remain in facts.json and the Explorer overlay, not qualified RDF assertions.",
+    "Input is one UTF-8 document of at most 32000 Unicode characters; no automatic chunking or cross-document entity merging."
+  ],
+  "files": {
+    "source.txt": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+    "source-manifest.json": "515ce49531f0a241c07b9017bfb235544d271f6dcd3d9331419cdfd7faab76eb",
+    "facts.json": "41c18ebd1eaa37be17a544bb976e2d9382aafcc82c2ca0925bca61df850ee53b",
+    "extraction.json": "c10ca7b2d6d26677936d32248a0ce27d4dfd1dd9503fb9f1471d0046f252e2bf",
+    "extraction-issues.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "entity-prompt.txt": "7e64bc4291dc4700b294a2e63762727b63e94e851680032ceff3cd4ee05a4492",
+    "relationship-prompt.txt": "8e5bbb84ba5674388ea0370f6213e19912587108d0721ebc6376b4fc9a3f1d93",
+    "base.ttl": "d8fad82611d5b6ce372fc7e4b9dd7b25d3b95a6ab9343678d2e63ea03ac4ec30",
+    "ontology-prompt.txt": "0b244f254de86630f9f92424a3e6b8f9f3628f83331b9076a2acac18efe54cd2",
+    "ontology.json": "0e04ff9075e680ac22966765f40729961d0d22e780b49e4da34781d3fd3efaa3",
+    "ontology.ttl": "32694f7d34742c93e8b77f839357f47b2c0f48ff7b2b56e61515469a74ebee25",
+    "shapes.ttl": "26f26790287d9eedefc7ff958dd5002c7849f30da68120dd164cbe31ea89dd09",
+    "issues.json": "501374dd68ef8f8aa21997c3b9b391c39debb442833bd234422d25ad1c723475",
+    "candidate-graph.json": "8a48145ccf8ad13281fc21fa95ac4df7886e95d1139d93eca759ad94b8129cc1"
+  }
+}

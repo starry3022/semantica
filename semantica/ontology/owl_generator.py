@@ -27,8 +27,9 @@ Author: Semantica Contributors
 License: MIT
 """
 
-from pathlib import Path
+import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ..utils.exceptions import ProcessingError, ValidationError
@@ -286,6 +287,8 @@ class OWLGenerator:
                 prop_label = prop.get("label") or prop.get("name")
                 if prop_label:
                     g.add((prop_uri, RDFS.label, Literal(prop_label)))
+                if prop.get("comment"):
+                    g.add((prop_uri, RDFS.comment, Literal(prop["comment"])))
 
                 # Add domain
                 domains = self._as_list(prop.get("domain", []))
@@ -311,6 +314,8 @@ class OWLGenerator:
                 prop_label = prop.get("label") or prop.get("name")
                 if prop_label:
                     g.add((prop_uri, RDFS.label, Literal(prop_label)))
+                if prop.get("comment"):
+                    g.add((prop_uri, RDFS.comment, Literal(prop["comment"])))
 
                 # Add domain
                 domains = self._as_list(prop.get("domain", []))
@@ -398,6 +403,9 @@ class OWLGenerator:
             prop_label = prop.get("label") or prop.get("name")
             if prop_label:
                 lines.append(f'    rdfs:label "{prop_label}" ;')
+            if prop.get("comment"):
+                comment = json.dumps(prop["comment"], ensure_ascii=False)
+                lines.append(f"    rdfs:comment {comment} ;")
 
             # Domain
             domains = self._as_list(prop.get("domain", []))

@@ -170,7 +170,19 @@ def test_complete_bundle_and_relocation_replay(cli, extraction, generation, tmp_
     assert json.loads((args.output / "facts.json").read_text()) == expected["facts"]
     rdf = Graph().parse(args.output / "base.ttl", format="turtle")
     owl = Graph().parse(args.output / "ontology.ttl", format="turtle")
-    assert set(rdf.objects(None, RDF.type)) == set(owl.subjects(RDF.type, OWL.Class))
+    assert summary["format_version"] == "candidate-facts-bundle-v2"
+    assert summary["validation_scope"] == "business_projection_schema"
+    assert summary["preservation_conforms"] is True
+    from semantica.ontology.candidate_statements import prepare_candidate_statements
+
+    projection = prepare_candidate_statements(expected["facts"]).projection.graph
+    assert set(projection.objects(None, RDF.type)) == set(
+        owl.subjects(RDF.type, OWL.Class)
+    )
+    assert len(list(rdf.subjects(RDF.type, RDF.Statement))) == 1
+    preserved = json.loads((args.output / "preservation.json").read_text())
+    assert preserved["conforms"] is True
+    assert preserved["scope"] == "source_derived_preservation"
     manifest = json.loads((args.output / "source-manifest.json").read_text())
     assert manifest["sources"][0]["path"] == "source.txt"
     assert manifest["sources"][0]["version"] is None
@@ -200,6 +212,48 @@ def test_complete_bundle_and_relocation_replay(cli, extraction, generation, tmp_
     assert replayed["mode"] == "offline_replay"
     for name in ("facts.json", "base.ttl", "candidate-graph.json", "source.txt"):
         assert (replay_args.output / name).read_bytes() == (moved / name).read_bytes()
+
+
+def test_real_v1_fixture_replays_without_a_provider(cli, tmp_path, monkeypatch):
+    fixture = Path(__file__).parents[1] / "fixtures" / "candidate_bundle_v1"
+
+    def no_provider(*args, **kwargs):
+        raise AssertionError("Offline replay attempted a provider call")
+
+    monkeypatch.setattr(cli, "extract_candidate_facts", no_provider)
+    monkeypatch.setattr(cli, "OntologyGenerator", no_provider)
+    args = Namespace(replay=fixture, output=tmp_path / "v1-replay")
+    summary = cli.run(args)
+    assert summary["format_version"] == "candidate-facts-bundle-v1"
+    assert summary["mode"] == "offline_replay"
+    for name in (
+        "facts.json",
+        "extraction.json",
+        "base.ttl",
+        "candidate-graph.json",
+        "entity-prompt.txt",
+        "relationship-prompt.txt",
+        "ontology-prompt.txt",
+        "ontology.json",
+    ):
+        assert (args.output / name).read_bytes() == (fixture / name).read_bytes()
+
+
+def test_replay_rejects_changed_qualifiers_with_updated_manifest(
+    cli, extraction, generation, tmp_path
+):
+    args = args_for(tmp_path, extraction[0])
+    cli.run(args)
+    path = args.output / "facts.json"
+    facts = json.loads(path.read_text())
+    facts["relationships"][0]["metadata"]["condition"] = "different condition"
+    path.write_text(json.dumps(facts))
+    summary_path = args.output / "SUMMARY.json"
+    summary = json.loads(summary_path.read_text())
+    summary["files"]["facts.json"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    summary_path.write_text(json.dumps(summary))
+    with pytest.raises(ValueError, match="facts"):
+        cli.run(Namespace(replay=args.output, output=tmp_path / "replay"))
 
 
 def test_nonempty_output_rejected_before_model_call(

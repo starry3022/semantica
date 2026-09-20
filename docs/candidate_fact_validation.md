@@ -3,18 +3,18 @@
 The primary source-to-graph workflow uses the native LLM entity and relationship
 entrypoints with the opt-in `candidate_facts` profile. The LLM proposes domain
 types and relationships; code assigns source-scoped IDs and checks references
-and citations. One candidate-facts dictionary feeds RDFExporter and the LLM
-OntologyGenerator, followed by technical validation:
+and citations. Bundle v2 keeps complete candidate records in qualified RDF and
+passes those same records to the LLM OntologyGenerator:
 
 ```text
 UTF-8 source → extract_entities_llm → extract_relations_llm
                               ↓
                     entities / relationships
                       ↙                 ↘
-              RDFExporter       OntologyGenerator(method="llm")
-               base RDF              ontology draft
+           named RDF statements   LLM ontology (complete context)
+             base.ttl              business vocabulary only
                       ↘                 ↙
-                      validate_graph → issues
+            preservation check + internal projection SHACL
 ```
 
 `candidate_facts` is an extension in this branch to the native extraction APIs.
@@ -73,9 +73,10 @@ different free port if that address already hosts another session. A missing
 
 In Knowledge Explorer, select a candidate entity, open its declared class in
 Ontology Hub, or use **Open source material** to inspect explicit evidence.
-The class and property identities come from the actual base RDF. Only one
+The class and property identities use the native exporter's IRI rules. Only one
 ontology draft is registered. Evidence and source nodes are a provenance display
-overlay, not a second business ontology. Relations with several evidence items
+overlay, not a second business ontology. In v2 that evidence is also retained in
+`base.ttl`. Relations with several evidence items
 expose each item through the existing source viewer.
 
 The main graph uses a neutral default node color. Selection, hover, paths and
@@ -141,13 +142,21 @@ startup script, another worktree, or a developer's absolute filesystem path.
 
 ## Evidence and semantic limits
 
-The `candidate-facts-extraction-v3` prompt embeds its response schema and supplies
+The `candidate-facts-extraction-v4` prompt embeds its response schema and supplies
 numbered original lines. It also works without the optional instructor package. The
 model selects supporting line intervals; code extracts the exact quote and
 computes Unicode offsets without asking the model to count characters. Original
 line endings are preserved. Explicit quote/character claims remain supported;
 conflicting line and character claims are rejected as a location and retained
 for review, never silently repaired.
+
+The prompt resolves additions and inherited duties separately from replacements
+and exemptions, attaches the current applicability condition to retained duties,
+and asks for all supporting clauses. Action timing, working-day deadlines and
+source-language modality remain part of the candidate interpretation. These are
+instructions to the model, not deterministic business rules. Replay reconstructs
+the exact v3 or v4 prompt and checks its hash; a new prompt cannot silently replay
+an old extraction under the same identity.
 
 Entity IDs are stable when replaying the same recorded extraction. Model-local
 IDs can be reassigned when the same document is extracted again, so a fresh run
@@ -168,15 +177,59 @@ requirement is not a concrete existing contract. These are prompt requirements,
 not claims of perfect extraction. Review `extraction-issues.json`,
 `ontology.json` uncertainties and the technical report.
 
-Native RDFExporter emits base entity/relation triples. Explicit evidence and
-conditional/negative/modality qualifiers remain in `facts.json`, typed responses
-and the Explorer overlay; they are not serialized as qualified RDF assertions.
-Keep those files when transferring the result. The base RDF alone is not a
-lossless policy representation and is not an executable approval engine.
+Bundle v2 represents **every** relationship as a named `rdf:Statement` with
+`rdf:subject`, `rdf:predicate` and `rdf:object`. It does not also assert the bare
+business triple. For example, an approval duty under one amount condition and
+the same duty under another remain distinct assertion resources. Permissions,
+negations and conditional requirements therefore do not become unconditional
+facts. Entity type/name triples remain ordinary RDF.
+
+The `https://semantica.dev/candidate#` transport vocabulary carries conditions,
+modality, negation, confidence and linked evidence. Canonical JSON records retain
+the entire input, including unknown metadata and the distinction between an
+absent field, null and false. Statement IDs use supplied relationship IDs;
+records without IDs receive deterministic content-based IDs. Ontology metadata
+binds both complete-facts and authoritative-RDF hashes. Its LLM prompt includes
+full records and evidence; the business schema excludes transport vocabulary.
+OWL exports retain property comments as `rdfs:comment`.
+
+`preservation.json` compares qualified RDF with the supplied extracted facts. It
+detects removed assertions, changed qualifiers and extra bare business triples.
+It cannot detect facts missing from extraction itself. `issues.json` runs SHACL
+on an internal business projection and labels its scope
+`business_projection_schema`; `conforms` refers to that schema check only.
+Independent source-based questions are still needed to evaluate business
+completeness. Neither report makes this an executable approval/calendar engine.
+
+Existing v1 bundles remain readable and replayable with their original prompts,
+facts and graph projection. Their `base.ttl` contains bare relationships, with
+qualifiers only in sidecar JSON and the viewer. Replay keeps that v1 contract;
+it does not silently reinterpret the old graph as qualified RDF. OWL serialization
+now retains property comments when regenerating an old draft.
 
 ## Existing candidate-fact input
 
 The same `entities` / `relationships` dictionary feeds two native components:
+
+The source extraction CLI enables qualified statements automatically. Direct
+callers can select the same representation explicitly:
+
+```python
+from semantica.ontology import OntologyGenerator
+from semantica.ontology.candidate_statements import (
+    prepare_candidate_statements,
+    validate_candidate_statements,
+)
+
+statements = prepare_candidate_statements(candidate_facts)
+draft = OntologyGenerator(**private_provider_config).generate_ontology(
+    candidate_facts, method="llm", qualified_statements=True
+)
+preservation = validate_candidate_statements(statements.rdf, candidate_facts)
+```
+
+The existing default API and `validate_candidate_facts.py` keep their original
+bare-RDF contract for compatibility:
 
 ```text
 candidate facts ── OntologyGenerator(method="llm") ── ontology draft ──┐

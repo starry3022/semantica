@@ -1,0 +1,29 @@
+@prefix : <https://example.test/candidate/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+: a owl:Ontology ;
+    rdfs:label "LegacyCandidate" .
+
+<https://semantica.dev/ns#approves> a owl:ObjectProperty ;
+    rdfs:label "候选属性" ;
+    rdfs:domain <https://semantica.dev/ns#ApprovalRole> ;
+    rdfs:range <https://semantica.dev/ns#PaymentRequest> .
+
+<https://semantica.dev/ns#confidence> a owl:DatatypeProperty ;
+    rdfs:label "候选属性" ;
+    rdfs:range xsd:decimal .
+
+<https://semantica.dev/ns#text> a owl:DatatypeProperty ;
+    rdfs:label "候选属性" ;
+    rdfs:range xsd:string .
+
+<https://semantica.dev/ns#ApprovalRole> a owl:Class ;
+    rdfs:label "候选类别" ;
+    rdfs:comment "制度中的候选类别" .
+
+<https://semantica.dev/ns#PaymentRequest> a owl:Class ;
+    rdfs:label "候选类别" ;
+    rdfs:comment "制度中的候选类别" .
+

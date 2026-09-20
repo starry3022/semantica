@@ -3,10 +3,9 @@
 from copy import deepcopy
 
 import pytest
-from rdflib import Graph, OWL, RDF, RDFS, URIRef, XSD
+from rdflib import OWL, RDF, RDFS, XSD, Graph, Literal, URIRef
 
 from semantica.ontology.owl_generator import OWLGenerator
-
 
 BASE = "https://example.test/ontology/"
 
@@ -135,3 +134,40 @@ def test_basic_turtle_fallback_keeps_urn_references(monkeypatch):
         RDFS.range,
         URIRef("urn:example:EmployeeCode"),
     ) in graph
+
+
+@pytest.mark.parametrize(
+    "format,parser,use_rdflib",
+    [
+        ("turtle", "turtle", True),
+        ("rdfxml", "xml", True),
+        ("json-ld", "json-ld", True),
+        ("n3", "n3", True),
+        ("turtle", "turtle", False),
+    ],
+)
+@pytest.mark.parametrize(
+    "prop_type", ["object", "data", "datatype", "DatatypeProperty"]
+)
+@pytest.mark.parametrize("namespace", ["urn:example:", "https://example.test/vocab#"])
+def test_property_comment_export_preserves_literal_and_full_iri(
+    format, parser, use_rdflib, prop_type, namespace, monkeypatch, tmp_path
+):
+    if not use_rdflib:
+        monkeypatch.setattr("semantica.ontology.owl_generator.HAS_RDFLIB", False)
+    draft = ontology(namespace)
+    draft["classes"][0]["comment"] = "A person."
+    draft["properties"][0]["type"] = prop_type
+    comment = '雇佣关系："正式员工"\\合同\n第二行\t说明。'
+    draft["properties"][0]["comment"] = comment
+    before = deepcopy(draft)
+    output_path = tmp_path / "ontology.rdf"
+
+    OWLGenerator().export_owl(draft, output_path, format=format)
+    graph = Graph().parse(output_path, format=parser)
+
+    assert set(graph.subject_objects(RDFS.comment)) == {
+        (URIRef(namespace + "Person"), Literal("A person.")),
+        (URIRef(namespace + "worksFor"), Literal(comment)),
+    }
+    assert draft == before

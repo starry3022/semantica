@@ -1,0 +1,115 @@
+{
+  "entities": [
+    {
+      "id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "text": "财务主管",
+      "type": "ApprovalRole",
+      "confidence": 0.9,
+      "metadata": {
+        "source_id": "legacy-policy",
+        "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+        "provider": "openai",
+        "model": "legacy-fixture",
+        "extraction_method": "llm_typed",
+        "extraction_profile": "candidate_facts",
+        "prompt_version": "candidate-facts-extraction-v3",
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "model_entity_id": "e1",
+        "candidate_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+        "evidence": [
+          {
+            "start_line": 1,
+            "end_line": 1,
+            "quote": "单笔金额不足9000元时，财务主管应提前审批付款申请。",
+            "start_char": 0,
+            "end_char": 27,
+            "source_id": "legacy-policy",
+            "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+            "span_origin": "program_from_selected_lines",
+            "status": "citation_aligned",
+            "message": "Exact source lines selected by the model; quote and Unicode offsets computed by the program. This is not business approval."
+          }
+        ]
+      }
+    },
+    {
+      "id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "text": "付款申请",
+      "type": "PaymentRequest",
+      "confidence": 0.9,
+      "metadata": {
+        "source_id": "legacy-policy",
+        "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+        "provider": "openai",
+        "model": "legacy-fixture",
+        "extraction_method": "llm_typed",
+        "extraction_profile": "candidate_facts",
+        "prompt_version": "candidate-facts-extraction-v3",
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "model_entity_id": "e2",
+        "candidate_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+        "evidence": [
+          {
+            "start_line": 1,
+            "end_line": 1,
+            "quote": "单笔金额不足9000元时，财务主管应提前审批付款申请。",
+            "start_char": 0,
+            "end_char": 27,
+            "source_id": "legacy-policy",
+            "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+            "span_origin": "program_from_selected_lines",
+            "status": "citation_aligned",
+            "message": "Exact source lines selected by the model; quote and Unicode offsets computed by the program. This is not business approval."
+          }
+        ]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:relationship:c87630f900b7b4ace86e6f612294bf1a71edceb67a72ff5a1f3b765800473c6b",
+      "source_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:8b5cc4df7eec7d32a7814eca4af047ae33b2d52342667715682e19c25b0b9faa",
+      "target_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:entity:ac0f09c0f8bf5e7a4b063d863255f16d8ce9abe600e288d934cf313bcbff63eb",
+      "type": "approves",
+      "confidence": 0.9,
+      "metadata": {
+        "source_id": "legacy-policy",
+        "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+        "provider": "openai",
+        "model": "legacy-fixture",
+        "extraction_method": "llm_typed",
+        "extraction_profile": "candidate_facts",
+        "prompt_version": "candidate-facts-extraction-v3",
+        "fact_status": "candidate",
+        "review_status": "unreviewed",
+        "candidate_id": "urn:semantica:candidate:cba6acab3dc42cf29ba89c0ce34f0e430ea58486297a1a87b771361eafd81902:relationship:c87630f900b7b4ace86e6f612294bf1a71edceb67a72ff5a1f3b765800473c6b",
+        "condition": "单笔金额不足9000元时",
+        "negation": null,
+        "modality": "应提前",
+        "evidence": [
+          {
+            "start_line": 1,
+            "end_line": 1,
+            "quote": "单笔金额不足9000元时，财务主管应提前审批付款申请。",
+            "start_char": 0,
+            "end_char": 27,
+            "source_id": "legacy-policy",
+            "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+            "span_origin": "program_from_selected_lines",
+            "status": "citation_aligned",
+            "message": "Exact source lines selected by the model; quote and Unicode offsets computed by the program. This is not business approval."
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "source_id": "legacy-policy",
+    "source_sha256": "262c3ddac2716854197790076860c375341fa0fa069d4078d8d55352df7bd5cf",
+    "fact_status": "candidate",
+    "review_status": "unreviewed",
+    "extraction_profile": "candidate_facts"
+  }
+}
