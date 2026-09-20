@@ -78,6 +78,19 @@ ontology draft is registered. Evidence and source nodes are a provenance display
 overlay, not a second business ontology. Relations with several evidence items
 expose each item through the existing source viewer.
 
+The main graph uses a neutral default node color. Selection, hover, paths and
+explicit distance views provide the color emphasis; there is no permanent
+per-type color legend above the canvas.
+
+Hub's class property list also shows predicates actually used by the class's
+explicit instances, joined to the same full property IRI used in Explorer.
+Observed usage is labeled separately from a domain declaration and does not
+make a property mandatory or add an ontology constraint. Incoming-only range
+references remain collapsed, outside the main property count. When candidate/review
+status exists only as display metadata, Explorer keeps it in collapsed
+**Record details** instead of presenting it as a declared class property. Older
+graphs that explicitly define those predicates retain their property links.
+
 Copy the **whole bundle directory** to another machine; paths inside it are
 relative. Only the code checkout, installed dependencies, built frontend and the
 bundle are needed for viewing. Private model configuration is needed only when

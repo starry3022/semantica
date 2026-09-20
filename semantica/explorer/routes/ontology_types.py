@@ -127,6 +127,22 @@ def _label(node, fallback):
     return fallback
 
 
+def _property_definition(graph, key, uri):
+    target = graph.nodes.get(uri)
+    loaded = target is not None and any(
+        _iri(declared) in _PROPERTY_TYPES
+        for declared, _ in _declarations(graph, target)
+    )
+    owner = _properties(target).get("scheme_uri") if loaded else None
+    return {
+        "key": key,
+        "property_uri": uri,
+        "label": _label(target, key) if loaded else key,
+        "loaded": loaded,
+        "ontology_uri": owner if isinstance(owner, str) else None,
+    }
+
+
 def _property_definitions(graph, node):
     """Resolve field identities without matching local names across ontologies."""
     base = _namespace(graph)
@@ -142,22 +158,94 @@ def _property_definitions(graph, node):
             uri = _iri(base + key)
         if uri is None:
             continue
-        target = graph.nodes.get(uri)
-        loaded = target is not None and any(
-            _iri(declared) in _PROPERTY_TYPES
-            for declared, _ in _declarations(graph, target)
-        )
-        owner = _properties(target).get("scheme_uri") if loaded else None
-        definitions.append(
-            {
-                "key": key,
-                "property_uri": uri,
-                "label": _label(target, key) if loaded else key,
-                "loaded": loaded,
-                "ontology_uri": owner if isinstance(owner, str) else None,
-            }
-        )
+        definitions.append(_property_definition(graph, key, uri))
     return definitions
+
+
+def _observed_properties(graph, node_ids):
+    """Summarize predicate usage without adding domain or required constraints."""
+    # Unqualified display/state keys need an exact loaded predicate definition.
+    # Full IRIs with the same local name remain independent, usable predicates.
+    display_keys = {
+        "content",
+        "label",
+        "fact_status",
+        "review_status",
+        "x",
+        "y",
+        "color",
+        "size",
+        "valid_from",
+        "valid_until",
+        "source",
+        "source_url",
+        "pmid",
+        "pmids",
+        "evidence",
+        "provenance",
+        "confidence",
+    }
+    observed = {}
+    base = _namespace(graph)
+
+    def record(definition, node_id, kind):
+        uri = definition["property_uri"]
+        if uri == _RDF + "type":
+            return
+        row = observed.setdefault(
+            uri,
+            {
+                **{key: value for key, value in definition.items() if key != "key"},
+                "kinds": set(),
+                "instances": set(),
+            },
+        )
+        row["kinds"].add(kind)
+        row["instances"].add(node_id)
+
+    for node_id in node_ids:
+        node = graph.nodes[node_id]
+        properties = _properties(node)
+        for definition in _property_definitions(graph, node):
+            key = definition["key"]
+            if key in _TYPE_KEYS or (key in display_keys and not definition["loaded"]):
+                continue
+            value = properties[key]
+            values = value if isinstance(value, list) else [value]
+            if any(isinstance(item, (str, int, float, bool)) for item in values):
+                record(definition, node_id, "literal")
+        for edge in graph._adjacency.get(node_id, []):
+            if edge.source_id != node_id:
+                continue
+            uri = _iri(edge.edge_type)
+            if (
+                uri is None
+                and base
+                and isinstance(edge.edge_type, str)
+                and re.fullmatch(r"[\w.-]+", edge.edge_type)
+            ):
+                candidate = _iri(base + edge.edge_type)
+                # A bare relation name is not enough to turn a display edge
+                # into an RDF assertion; require its exact loaded definition.
+                if (
+                    candidate
+                    and _property_definition(graph, edge.edge_type, candidate)["loaded"]
+                ):
+                    uri = candidate
+            if uri is not None:
+                record(_property_definition(graph, uri, uri), node_id, "object")
+    return [
+        {
+            **{
+                key: value
+                for key, value in observed[uri].items()
+                if key not in {"kinds", "instances"}
+            },
+            "kinds": sorted(observed[uri]["kinds"]),
+            "instance_count": len(observed[uri]["instances"]),
+        }
+        for uri in sorted(observed)
+    ]
 
 
 def _memberships(graph, node):
@@ -313,6 +401,9 @@ def class_instances(
         return {
             "class_uri": class_uri,
             "instances": instances[skip : skip + limit],
+            "observed_properties": _observed_properties(
+                session.graph, [instance["node_id"] for instance in instances]
+            ),
             "total": len(instances),
             "skip": skip,
             "limit": limit,

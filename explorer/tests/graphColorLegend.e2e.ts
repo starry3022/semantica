@@ -4,15 +4,16 @@ import { existsSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { chromium, type Page } from "playwright";
+import type Sigma from "sigma";
 
 const BASE_URL = "http://127.0.0.1:4175";
 const initialNodes = [
-  { id: "alice", type: "Person", content: "Alice", properties: {} },
-  { id: "bob", type: "Person", content: "Bob", properties: {} },
-  { id: "acme", type: "Organization", content: "Acme", properties: {} },
-  { id: "london", type: "Location", content: "London", properties: {} },
-  { id: "research", type: "Project", content: "Research", properties: {} },
-  { id: "report", type: "Document", content: "Report", properties: {} },
+  { id: "alice", type: "https://example.org/very/long/ontology/namespace#FinanceHead", content: "Alice", properties: {} },
+  { id: "bob", type: "https://example.org/very/long/ontology/namespace#DepartmentHead", content: "Bob", properties: {} },
+  { id: "acme", type: "https://example.org/very/long/ontology/namespace#Organization", content: "Acme", properties: {} },
+  { id: "london", type: "https://example.org/very/long/ontology/namespace#Location", content: "London", properties: {} },
+  { id: "research", type: "https://example.org/very/long/ontology/namespace#Project", content: "Research", properties: {} },
+  { id: "report", type: "https://example.org/very/long/ontology/namespace#Document", content: "Report", properties: {} },
 ];
 const edges = [
   ["alice", "acme", "WORKS_AT"], ["bob", "acme", "WORKS_AT"],
@@ -22,29 +23,32 @@ const edges = [
   id: `edge_${i}`, familyId: `edge_${i}`, source, target, type, weight: 1, properties: {},
 }));
 
-async function assertLegendMatchesGraph(page: Page, nodeIds?: string[]) {
-  const result = await page.evaluate(async (includedNodeIds) => {
-    const storePath = "/src/store/graphStore.ts";
-    const { graph } = await import(storePath);
-    const colors: Record<string, string> = {};
-    graph.forEachNode((id: string, attrs: { semanticGroup: string; baseColor: string }) => {
-      if (includedNodeIds && !includedNodeIds.includes(id)) return;
-      const hex = attrs.baseColor.replace("#", "");
-      colors[attrs.semanticGroup] = `rgb(${[0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
-    });
-    const items = [...document.querySelectorAll(".explore-color-legend-item")].map((item) => ({
-      group: item.querySelector(".explore-color-legend-name")?.textContent,
-      color: getComputedStyle(item.querySelector(".explore-color-legend-mark")!).backgroundColor,
-    }));
-    return { colors, items };
-  }, nodeIds);
-  assert.equal(result.items.length, Object.keys(result.colors).length);
-  for (const item of result.items) {
-    assert.equal(item.color, result.colors[item.group!], `Swatch for ${item.group} must match the loaded canvas color`);
-  }
+async function renderedNodeColors(page: Page) {
+  return page.evaluate(() => {
+    type Hook = { memoizedState?: { current?: Sigma }; next?: Hook };
+    type Fiber = { memoizedState?: Hook; return?: Fiber };
+    const canvas = document.querySelector("canvas.sigma-mouse");
+    for (let element = canvas?.parentElement; element; element = element.parentElement) {
+      const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
+      const fields = element as unknown as Record<string, Fiber>;
+      for (let fiber = key ? fields[key] : undefined; fiber; fiber = fiber.return) {
+        for (let hook = fiber.memoizedState; hook && typeof hook === "object"; hook = hook.next) {
+          const renderer = hook.memoizedState?.current;
+          if (typeof renderer?.getGraph !== "function" || typeof renderer.getNodeDisplayData !== "function") continue;
+          return renderer.getGraph().nodes().map((id) => ({
+            id,
+            storedColor: renderer.getGraph().getNodeAttribute(id, "baseColor") as string,
+            type: renderer.getGraph().getNodeAttribute(id, "nodeType") as string,
+            color: renderer.getNodeDisplayData(id)?.color,
+          }));
+        }
+      }
+    }
+    throw new Error("Graph renderer not found");
+  });
 }
 
-test("visible legend follows loaded data, reloads, focused views, and distance mode", async (t) => {
+test("neutral canvas preserves space and interaction colors without a persistent type legend", async (t) => {
   const server = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", "4175", "--strictPort"], { stdio: "ignore" });
   t.after(() => { server.kill(); });
   let ready = false;
@@ -81,9 +85,12 @@ test("visible legend follows loaded data, reloads, focused views, and distance m
   await page.goto(BASE_URL);
   await page.getByRole("button", { name: "Open Semantica Explorer" }).click();
   const legend = page.getByRole("group", { name: "Node colors" });
-  await legend.waitFor();
   await page.locator("canvas").first().waitFor({ state: "visible" });
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+  assert.equal(await legend.count(), 0, "No type or module legend occupies the main viewport");
+  const original = await renderedNodeColors(page);
+  assert.equal(new Set(original.map((node) => node.color)).size, 1, "Each class does not create a distinct rendered color");
+  assert.ok(new Set(original.map((node) => node.storedColor)).size > 1, "Original color metadata is retained");
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 800, height: 800 }]) {
     await page.setViewportSize(viewport);
     await page.waitForFunction(() => {
       const canvas = document.querySelector("canvas.sigma-mouse")?.getBoundingClientRect();
@@ -92,8 +99,11 @@ test("visible legend follows loaded data, reloads, focused views, and distance m
     });
     const toolbar = await page.locator(".explore-command-deck").boundingBox();
     const canvas = await page.locator("canvas.sigma-mouse").boundingBox();
-    assert.ok(toolbar && toolbar.height <= 160, "Primary controls must leave room for the graph on laptop screens");
+    assert.ok(toolbar && toolbar.height <= (viewport.width === 800 ? 180 : 160), "Primary controls must leave room for the graph");
     assert.ok(canvas && canvas.height >= viewport.height * .55);
+    const search = await page.getByPlaceholder("Search command, node, or concept").boundingBox();
+    assert.ok(search && toolbar && search.y + search.height <= toolbar.y + toolbar.height, "Search stays inside the compact toolbar");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await page.getByText("Graph tools", { exact: true }).click();
     assert.equal((await page.locator("canvas.sigma-mouse").boundingBox())?.height, canvas.height, "Tools open over the graph without shrinking it");
     await page.getByRole("checkbox", { name: "Include ontology schema" }).focus();
@@ -109,36 +119,42 @@ test("visible legend follows loaded data, reloads, focused views, and distance m
   await page.getByRole("checkbox", { name: "Include ontology schema" }).uncheck();
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await assertLegendMatchesGraph(page);
-  assert.equal(await legend.getByText("Person", { exact: true }).count(), 1);
-  assert.equal(await legend.getByText("Biomolecule", { exact: true }).count(), 0);
+  assert.equal(await legend.count(), 0);
 
-  nodes = initialNodes.map((node) => ({ ...node, type: node.type === "Person" ? "Researcher" : node.type }));
+  nodes = initialNodes.map((node) => ({ ...node, type: node.type.replace("FinanceHead", "Researcher") }));
   await page.getByText("Graph tools", { exact: true }).click();
   await page.getByRole("button", { name: "Reload graph data" }).click();
   assert.equal(await page.locator(".explore-tools-menu > summary").evaluate((element) => document.activeElement === element), true, "A tool action returns focus to the visible disclosure");
-  await legend.getByText("Researcher", { exact: true }).waitFor();
-  assert.equal(await legend.getByText("Person", { exact: true }).count(), 0);
-  await assertLegendMatchesGraph(page);
+  await page.waitForFunction(async () => {
+    const storePath = "/src/store/graphStore.ts";
+    const { graph } = await import(storePath);
+    return String(graph.getNodeAttribute("alice", "nodeType")).endsWith("#Researcher");
+  });
+  assert.equal(await legend.count(), 0);
+  assert.equal(new Set((await renderedNodeColors(page)).map((node) => node.color)).size, 1);
 
   await page.getByPlaceholder("Search command, node, or concept").fill("Alice");
   await page.getByRole("option").filter({ hasText: "Alice" }).click();
   const heatmap = page.getByRole("button", { name: "Heatmap", exact: true });
   await page.getByText("Graph tools", { exact: true }).click();
   await heatmap.click();
-  await legend.waitFor({ state: "hidden" });
+  await page.getByText("Outside", { exact: true }).waitFor();
+  assert.equal(await legend.count(), 0);
+  assert.ok(new Set((await renderedNodeColors(page)).map((node) => node.color)).size > 1, "Explicit distance mode retains its colors");
   await page.getByText("Graph tools", { exact: true }).click();
   await heatmap.click();
-  await legend.waitFor();
-  await assertLegendMatchesGraph(page);
+  await page.getByText("Outside", { exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await legend.count(), 0);
   const focusButton = page.getByRole("button", { name: "Focus", exact: true });
   assert.equal(await focusButton.isDisabled(), false, "Focus is enabled once a node is selected");
   await focusButton.click();
-  await legend.getByText("Document", { exact: true }).waitFor({ state: "hidden" });
-  await assertLegendMatchesGraph(page, ["alice", "acme", "research"]);
-  assert.equal(await legend.getByText("Researcher", { exact: true }).count(), 1);
+  const focused = await renderedNodeColors(page);
+  assert.deepEqual(focused.map((node) => node.id).sort(), ["acme", "alice", "research"]);
+  assert.notEqual(focused.find((node) => node.id === "alice")?.color, focused.find((node) => node.id === "acme")?.color);
+  assert.equal(focused.find((node) => node.id === "acme")?.color, focused.find((node) => node.id === "research")?.color);
+  assert.equal(await legend.count(), 0);
   await page.getByRole("button", { name: "Full Graph", exact: true }).click();
-  await legend.getByText("Document", { exact: true }).waitFor();
-  await assertLegendMatchesGraph(page);
+  assert.equal((await renderedNodeColors(page)).length, initialNodes.length);
+  assert.equal(await legend.count(), 0);
   assert.deepEqual(errors, []);
 });

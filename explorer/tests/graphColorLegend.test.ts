@@ -15,23 +15,56 @@ function attributes(overrides: Partial<NodeAttributes> = {}): NodeAttributes {
   };
 }
 
-test("legend matches normal canvas colors, including color and theme fallbacks", () => {
-  const graph = new Graph();
+test("default canvas color is neutral across types, modules, and stored color metadata", () => {
   const samples = [
-    attributes({ baseColor: "#abcdef" }),
-    attributes({ semanticGroup: "Organization" }),
-    attributes({ semanticGroup: "Location", color: "" }),
+    attributes({ nodeType: "https://example.org/policy#FinanceHead", baseColor: "#abcdef" }),
+    attributes({ nodeType: "https://example.org/policy#Contract", semanticGroup: "Procurement", color: "#ff0000", baseColor: "#ff00ff", mutedColor: "#ff0000", borderColor: "#ffff00", glowColor: "#ff0000" }),
+    attributes({ nodeType: "https://example.org/policy#Invoice", semanticGroup: "Finance", color: "#0000ff", baseColor: "#00ffff", strokeColor: "#00ff00", haloColor: "#00ff00" }),
   ];
-  samples.forEach((attrs, i) => graph.addNode(String(i), attrs));
-  const items = buildGraphColorLegend(graph);
-  for (const attrs of samples) {
-    const item = items.find((entry) => entry.group === attrs.semanticGroup)!;
-    const style = resolveNodeElementStyle(GRAPH_THEME, "inspection", "default", attrs, attrs.label);
-    assert.equal(style.color, withAlpha(item.color, GRAPH_THEME.nodes.entityShapes.entity.fillAlpha));
+  const before = structuredClone(samples);
+  for (const tier of ["overview", "structure", "inspection"] as const) {
+    for (const state of ["default", "neighbor", "muted", "inactive"] as const) {
+      const styles = samples.map((attrs) => resolveNodeElementStyle(GRAPH_THEME, tier, state, attrs, attrs.label));
+      for (const style of styles.slice(1)) {
+        assert.equal(style.color, styles[0].color, `${tier}/${state} fill`);
+        assert.equal(style.shellColor, styles[0].shellColor, `${tier}/${state} shell`);
+        assert.equal(style.borderColor, styles[0].borderColor, `${tier}/${state} border`);
+        assert.equal(style.haloColor, styles[0].haloColor, `${tier}/${state} halo`);
+      }
+    }
   }
-  assert.equal(items.find((item) => item.group === "Person")?.color, "#abcdef");
-  assert.equal(items.find((item) => item.group === "Organization")?.color, "#123456");
-  assert.equal(items.find((item) => item.group === "Location")?.color, GRAPH_THEME.palette.semantic[0]);
+  const style = resolveNodeElementStyle(GRAPH_THEME, "inspection", "default", samples[0], samples[0].label);
+  assert.equal(style.color, withAlpha(GRAPH_THEME.palette.overview.nodeCore, GRAPH_THEME.nodes.entityShapes.entity.fillAlpha));
+  assert.deepEqual(samples, before, "Display policy must preserve original graph metadata");
+});
+
+test("selection, hover, and path colors override stored ring and glow metadata", () => {
+  for (const state of ["selected", "hovered", "path"] as const) {
+    const clean = attributes();
+    const colored = attributes({ baseColor: "#ff0000", ringColor: "#ff0000", haloColor: "#00ff00", glowColor: "#ffff00" });
+    for (const tier of ["overview", "structure", "inspection"] as const) {
+      const expected = resolveNodeElementStyle(GRAPH_THEME, tier, state, clean, clean.label);
+      const actual = resolveNodeElementStyle(GRAPH_THEME, tier, state, colored, colored.label);
+      assert.equal(actual.color, GRAPH_THEME.palette.accent[state]);
+      assert.equal(actual.borderColor, expected.borderColor);
+      assert.equal(actual.ringColor, expected.ringColor);
+      assert.equal(actual.haloColor, expected.haloColor);
+      assert.equal(actual.showHalo, true);
+      assert.equal(actual.forceLabel, true);
+    }
+  }
+});
+
+test("grouped display nodes share the neutral fill without losing their group shape", () => {
+  const first = attributes({ isCommunityGroup: true, entityShape: "community", baseColor: "#ff0000", borderColor: "#ff0000" });
+  const second = attributes({ isCommunityGroup: true, entityShape: "community", baseColor: "#0000ff", borderColor: "#0000ff" });
+  for (const tier of ["overview", "structure", "inspection"] as const) {
+    const left = resolveNodeElementStyle(GRAPH_THEME, tier, "default", first, first.label);
+    const right = resolveNodeElementStyle(GRAPH_THEME, tier, "default", second, second.label);
+    assert.equal(left.color, right.color);
+    assert.equal(left.borderColor, right.borderColor);
+    assert.equal(left.entityShape, "community");
+  }
 });
 
 test("semantic groups, not shape categories, determine labels and distinct entries", () => {

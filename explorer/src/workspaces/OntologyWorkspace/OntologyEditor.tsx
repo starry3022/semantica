@@ -801,7 +801,18 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
               classUri={selectedElement.id}
               nodes={schema.nodes}
               edges={schema.edges}
-              onSelectTerm={(termUri) => {
+              graphRevision={graphRevision}
+              onSelectTerm={(termUri, ownerUri) => {
+                if (ownerUri && ownerUri !== ontologyUri) {
+                  writeEntitySelection(termUri);
+                  setSelectedElement(null);
+                  setFocusRequest({ nodeId: termUri });
+                  setShowContext(null);
+                  setUnownedEntity("");
+                  setEditing(false);
+                  setOntologyUri(ownerUri);
+                  return;
+                }
                 const term = nodes.find((node) => node.id === termUri);
                 if (term) selectNode(term);
               }}

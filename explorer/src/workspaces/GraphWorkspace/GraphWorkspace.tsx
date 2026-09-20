@@ -28,7 +28,6 @@ import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
 import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
 import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
-import { buildGraphColorLegend, type GraphColorLegendItem } from "./graphColorLegend";
 import { createKnowledgeGraphScope } from "./graphSchemaScope";
 import { projectInstanceTypes } from "./instanceTypeProjection";
 import { getNodeDisplayLabel, projectApprovalGroupLabels } from "./nodeDisplayLabels";
@@ -462,25 +461,6 @@ function SearchCommandBar({
         </ul>
       ) : null}
     </form>
-  );
-}
-
-function SemanticColorLegend({ items }: { items: GraphColorLegendItem[] }) {
-  if (!items.length) return null;
-  return (
-    <div className="explore-color-legend" role="group" aria-label="Node colors">
-      <span className="explore-color-legend-label" title="Base semantic colors; selection, zoom, and distance effects can change node appearance.">
-        Node colors
-      </span>
-      <ul className="explore-color-legend-items">
-        {items.map((item) => (
-          <li key={item.id} className="explore-color-legend-item" title={`${item.group}: ${item.count.toLocaleString()} nodes`}>
-            <span className="explore-color-legend-mark" style={{ backgroundColor: item.color }} aria-hidden="true" />
-            <span className="explore-color-legend-name">{item.group}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 
@@ -957,47 +937,6 @@ const HUD_CSS = `
   }
   .explore-tool-button[data-compact="true"] .explore-tool-button-label {
     display: none;
-  }
-  .explore-color-legend {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    padding: 2px 1px 0;
-    color: ${GRAPH_THEME.ui.text.subtle};
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .explore-color-legend-label {
-    flex-shrink: 0;
-    color: ${GRAPH_THEME.ui.text.muted};
-  }
-  .explore-color-legend-items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    min-width: 0;
-    max-height: 76px;
-    overflow-y: auto;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .explore-color-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: 100%;
-  }
-  .explore-color-legend-name {
-    overflow-wrap: anywhere;
-  }
-  .explore-color-legend-mark {
-    width: 10px;
-    height: 10px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16);
   }
   .explore-search-results {
     display: flex;
@@ -2406,11 +2345,6 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
     baseDisplayResult, showInstanceTypes ? instanceTypes.snapshot : null, graph,
   ), [baseDisplayResult, instanceTypes.snapshot, showInstanceTypes]);
   const hiddenSchemaCount = knowledgeScope.hiddenNodeCount - [...displayResult.classReferences].filter(id => knowledgeScope.schemaNodeIds.has(id) && !scopedGraph.hasNode(id)).length;
-  const colorLegendItems = useMemo(() => {
-    // Store mutations can preserve graph identity while changing its attributes.
-    void graphVersion;
-    return buildGraphColorLegend(displayResult.graph);
-  }, [displayResult.graph, graphVersion]);
   const baseDisplayState = useMemo(
     () => (
       viewMode === "grouped"
@@ -3289,7 +3223,6 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                     </div>
                   </details>
                 </div>
-                {!showDistanceStatus ? <SemanticColorLegend items={colorLegendItems} /> : null}
               </div>
 
               {egoModeEnabled && (

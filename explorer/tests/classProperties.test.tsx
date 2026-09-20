@@ -96,7 +96,9 @@ test("RDF structural blank nodes are not class entries and unsupported expressio
 test("property rows distinguish union OR from independent domain statements AND", () => {
   const mixed = [...unionEdges, { source: `${base}name`, target: parent, type: "rdfs:domain" }];
   const html = renderToStaticMarkup(<ClassPropertiesPanel classUri={role} nodes={unionNodes} edges={mixed} onSelectTerm={() => undefined} />);
-  assert.match(html, /Declared properties · 1/);
+  assert.match(html, /Properties · 2/);
+  assert.match(html, /Referenced as range · 1/);
+  assert.match(html, /Declared on this class/);
   assert.match(html, /Domain: 父类 AND \(角色 OR 活动\)/);
   assert.match(html, /Range: \(角色 OR 活动\)/);
   const simple = renderToStaticMarkup(<ClassPropertiesPanel classUri="child" nodes={nodes} edges={[...edges, { source: "owner", target: "other", type: "rdfs:domain" }]} onSelectTerm={() => undefined} />);

@@ -152,6 +152,156 @@ def test_loaded_candidate_namespace_connects_an_instance_to_its_exact_support_cl
     assert scene[1].to_dict() == before
 
 
+def test_observed_properties_use_all_explicit_instances_without_declaring_domains(
+    scene,
+):
+    client, graph, _ = scene
+    graph.metadata = {}
+    graph.nodes[RULE].node_type = RULE_CLASS
+    graph.nodes[RULE].properties.update(
+        {BASE + "text": "财务负责人", BASE + "confidence": "0.95", "rdf:type": RULE_CLASS}
+    )
+    graph.add_node(
+        "urn:item:second", RULE_CLASS, "另一负责人", **{BASE + "text": ["甲", "乙"]}
+    )
+    graph.add_node(
+        "urn:item:other", BUSINESS_CLASS, "其他类型", **{BUSINESS + "exclusive": "other"}
+    )
+    graph.add_node(BASE + "text", "owl:DatatypeProperty", "文本", scheme_uri=BASE)
+    graph.add_node(BASE + "confidence", "owl:DatatypeProperty", "置信度", scheme_uri=BASE)
+    graph.add_node(BASE + "approves", "owl:ObjectProperty", "审批", scheme_uri=BASE)
+    graph.add_edge(RULE, "urn:item:other", BASE + "approves", id="one")
+    graph.add_edge(RULE, "urn:item:second", BASE + "approves", id="two")
+    graph.add_edge("urn:item:second", "urn:item:other", BASE + "approves", id="three")
+    graph.add_edge(RULE, RULE_CLASS, "rdf:type", id="type")
+    graph.add_edge(RULE, "urn:item:other", "hasEvidence", id="overlay")
+    before = deepcopy(graph.to_dict())
+    pages = [
+        client.get(
+            INSTANCES, params={"class_uri": RULE_CLASS, "skip": skip, "limit": 1}
+        ).json()
+        for skip in (0, 1)
+    ]
+    expected = [
+        {
+            "property_uri": BASE + "approves",
+            "label": "审批",
+            "loaded": True,
+            "ontology_uri": BASE,
+            "kinds": ["object"],
+            "instance_count": 2,
+        },
+        {
+            "property_uri": BASE + "confidence",
+            "label": "置信度",
+            "loaded": True,
+            "ontology_uri": BASE,
+            "kinds": ["literal"],
+            "instance_count": 1,
+        },
+        {
+            "property_uri": BASE + "text",
+            "label": "文本",
+            "loaded": True,
+            "ontology_uri": BASE,
+            "kinds": ["literal"],
+            "instance_count": 2,
+        },
+    ]
+    assert pages[0]["observed_properties"] == expected
+    assert pages[1]["observed_properties"] == expected
+    assert pages[0]["total"] == 2
+    assert graph.to_dict() == before
+
+
+def test_observed_properties_keep_exact_namespaces_and_unloaded_definitions(scene):
+    client, graph, _ = scene
+    graph.nodes[RULE].properties.update(
+        {"name": "本地", BUSINESS + "name": "另一个命名空间", BUSINESS + "unloaded": 3}
+    )
+    graph.add_node(BASE + "name", "owl:DatatypeProperty", "名称", scheme_uri=BASE)
+    graph.add_node(
+        BUSINESS + "name", "owl:DatatypeProperty", "业务名称", scheme_uri=BUSINESS
+    )
+    graph.add_node("urn:target", BUSINESS_CLASS, "对象")
+    graph.add_edge(RULE, "urn:target", BUSINESS + "unloadedRelation")
+    rows = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()[
+        "observed_properties"
+    ]
+    by_uri = {row["property_uri"]: row for row in rows}
+    assert set(by_uri) == {
+        BASE + "name",
+        BUSINESS + "name",
+        BUSINESS + "unloaded",
+        BUSINESS + "unloadedRelation",
+    }
+    assert by_uri[BASE + "name"]["label"] == "名称"
+    assert by_uri[BUSINESS + "name"]["label"] == "业务名称"
+    assert by_uri[BUSINESS + "unloaded"]["loaded"] is False
+    assert by_uri[BUSINESS + "unloadedRelation"]["kinds"] == ["object"]
+    assert by_uri[BUSINESS + "unloadedRelation"]["instance_count"] == 1
+
+
+def test_observed_properties_ignore_display_metadata_and_reflect_current_graph(scene):
+    client, graph, _ = scene
+    graph.nodes[RULE].properties.update(
+        {
+            "content": "显示内容",
+            "x": 1,
+            "name": "财务负责人",
+            "source": "材料",
+            "confidence": 0.95,
+            "valid_from": "2026-01-01",
+        }
+    )
+    graph.add_node(BASE + "name", "owl:DatatypeProperty", "名称", scheme_uri=BASE)
+    before = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()
+    assert [row["property_uri"] for row in before["observed_properties"]] == [
+        BASE + "name"
+    ]
+    graph.nodes[RULE].properties.pop("name")
+    after = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()
+    assert after["observed_properties"] == []
+    assert (
+        client.get(INSTANCES, params={"class_uri": BUSINESS_CLASS}).json()[
+            "observed_properties"
+        ]
+        == []
+    )
+
+
+def test_observed_properties_keep_loaded_short_predicates_and_separate_namespaces(
+    scene,
+):
+    client, graph, _ = scene
+    graph.nodes[RULE].properties.update(
+        {"confidence": 0.95, "source": "材料", BUSINESS + "fact_status": "引用状态"}
+    )
+    for key in ("fact_status", "review_status", "confidence", "source"):
+        graph.add_node(BASE + key, "owl:DatatypeProperty", key, scheme_uri=BASE)
+    graph.add_node(
+        BUSINESS + "fact_status", "owl:DatatypeProperty", "外部状态", scheme_uri=BUSINESS
+    )
+    rows = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()[
+        "observed_properties"
+    ]
+    assert {row["property_uri"] for row in rows} == {
+        BASE + key for key in ("fact_status", "review_status", "confidence", "source")
+    } | {BUSINESS + "fact_status"}
+    assert all(row["instance_count"] == 1 for row in rows)
+    # A similarly named definition in another namespace does not identify a bare key.
+    graph.nodes.pop(BASE + "fact_status")
+    graph.nodes.pop(BASE + "review_status")
+    rows = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()[
+        "observed_properties"
+    ]
+    assert {row["property_uri"] for row in rows} == {
+        BASE + "confidence",
+        BASE + "source",
+        BUSINESS + "fact_status",
+    }
+
+
 def test_explicit_edges_properties_and_node_type_merge_without_duplicate_classes(scene):
     graph = scene[1]
     graph.add_node(

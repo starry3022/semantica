@@ -385,11 +385,24 @@ export function GraphInspectorPanel({
     (!instanceTypesLoading && !instanceTypesError && instanceTypes?.node_id === effectiveNodeId
       ? instanceTypes.property_definitions ?? [] : []).map((definition) => [definition.key, definition]),
   );
-  const accentColor = attributes?.color || "#58a6ff";
-  const propertyEntries = Object.entries(properties).filter(
+  const accentColor = GRAPH_THEME.ui.text.muted;
+  const typeLabel = getNodeDisplayLabel(graph, attributes?.nodeType || "Entity");
+  const visibleEntries = Object.entries(properties).filter(
     ([key]) =>
-      !["x","y","valid_from","valid_until","content","source","source_url","pmid","pmids","evidence","provenance","confidence"].includes(key),
+      propertyDefinitions.get(key)?.loaded
+      || !["x","y","valid_from","valid_until","content","source","source_url","pmid","pmids","evidence","provenance","confidence"].includes(key),
   );
+  const recordFields: Record<string, string> = {
+    "rdf:type": "Declared type（rdf:type）",
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": "Declared type（rdf:type）",
+    "@type": "Declared type（@type）",
+    fact_status: "Knowledge status（fact_status）",
+    review_status: "Business review（review_status）",
+  };
+  const isRecordField = (key: string) => Object.hasOwn(recordFields, key)
+    && (key === "rdf:type" || key.endsWith("#type") || !propertyDefinitions.get(key)?.loaded);
+  const propertyEntries = visibleEntries.filter(([key]) => !isRecordField(key));
+  const recordEntries = visibleEntries.filter(([key]) => isRecordField(key));
   const nodeContent = (typeof attributes?.content === "string" && attributes.content)
     ? attributes.content
     : (typeof properties.content === "string" && properties.content)
@@ -402,8 +415,8 @@ export function GraphInspectorPanel({
       <div style={{ borderBottom: `1px solid ${GRAPH_THEME.ui.surface.divider}`, paddingBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <span style={{ background: accentColor, boxShadow: `0 0 10px ${accentColor}`, width: 8, height: 8, borderRadius: "50%" }} />
-          <span style={{ color: accentColor, fontSize: 12, fontWeight: 700 }}>
-            {groupedDisplaySelection ? "Grouped Selection" : (attributes?.nodeType || "Entity")}
+          <span title={attributes?.nodeType} style={{ color: accentColor, fontSize: 12, fontWeight: 700, overflowWrap: "anywhere" }}>
+            {groupedDisplaySelection ? "Grouped Selection" : typeLabel}
           </span>
         </div>
         <h3 style={{ margin: 0, color: GRAPH_THEME.ui.text.strong, fontSize: 20, fontWeight: 700, wordBreak: "break-word" }}>
@@ -621,6 +634,17 @@ export function GraphInspectorPanel({
           )}
         </div>
       </details>
+      {recordEntries.length ? <details key={`${effectiveNodeId}:record-details`} className="node-panel-collapse">
+        <summary className="node-panel-summary">Record details</summary>
+        <div className="node-panel-body" style={{ display: "grid", gap: 8 }}>
+          {recordEntries.map(([key, value]) => <div key={key} style={propertyCardStyle}>
+            <div style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 11, marginBottom: 4 }}>{recordFields[key]}</div>
+            <div style={{ color: GRAPH_THEME.ui.text.body, fontSize: 13, overflowWrap: "anywhere" }}>
+              {typeof value === "object" ? JSON.stringify(value) : String(value)}
+            </div>
+          </div>)}
+        </div>
+      </details> : null}
     </aside>
   );
 }

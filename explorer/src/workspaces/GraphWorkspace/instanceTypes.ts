@@ -61,9 +61,19 @@ export interface InstanceTypesSnapshot {
   concept_reference_issues?: ConceptReferenceIssue[];
 }
 
+export interface ObservedClassProperty {
+  property_uri: string;
+  label: string;
+  loaded: boolean;
+  ontology_uri: string | null;
+  kinds: ("literal" | "object")[];
+  instance_count: number;
+}
+
 export interface ClassInstancesSnapshot {
   class_uri: string;
   instances: { node_id: string; label: string; basis: InstanceTypeBasis[] }[];
+  observed_properties?: ObservedClassProperty[];
   total: number;
   skip: number;
   limit: number;
@@ -143,10 +153,28 @@ export async function loadClassInstances(classUri: string, skip: number, limit: 
     || typeof value.total !== "number" || !Number.isSafeInteger(value.total) || value.total < 0
     || !Array.isArray(value.instances) || value.instances.length > limit
     || !value.instances.every((instance: unknown) => isRecord(instance)
-      && typeof instance.node_id === "string" && typeof instance.label === "string" && isBasis(instance.basis))) {
+      && typeof instance.node_id === "string" && typeof instance.label === "string" && isBasis(instance.basis))
+    || (value.observed_properties !== undefined && !isObservedProperties(value.observed_properties, value.total))) {
     throw new Error("The declared-instance response does not match the selected class or page.");
   }
   return value as unknown as ClassInstancesSnapshot;
+}
+
+function isObservedProperties(value: unknown, total: number): value is ObservedClassProperty[] {
+  if (!Array.isArray(value)) return false;
+  const uris = new Set<string>();
+  return value.every((property: unknown) => {
+    if (!isRecord(property) || typeof property.property_uri !== "string" || !property.property_uri
+      || uris.has(property.property_uri) || typeof property.label !== "string"
+      || typeof property.loaded !== "boolean" || !isNullableString(property.ontology_uri)
+      || typeof property.instance_count !== "number" || !Number.isSafeInteger(property.instance_count)
+      || property.instance_count < 1 || property.instance_count > total
+      || !Array.isArray(property.kinds) || !property.kinds.length
+      || new Set(property.kinds).size !== property.kinds.length
+      || !property.kinds.every((kind: unknown) => kind === "literal" || kind === "object")) return false;
+    uris.add(property.property_uri);
+    return true;
+  });
 }
 
 export async function loadConceptReferences(classUri: string, signal?: AbortSignal): Promise<ConceptReferencesSnapshot> {

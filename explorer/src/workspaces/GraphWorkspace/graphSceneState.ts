@@ -1022,7 +1022,8 @@ function resolveNodeColor(
   attrs: NodeAttributes,
   cameraRatio: number,
 ) {
-  const semanticColor = getSemanticNodeColor(attrs, theme);
+  // Classes and modules have no agreed color semantics; reserve color for interaction.
+  const semanticColor = theme.palette.overview.nodeCore;
   const isCommunityGroup = Boolean(attrs.isCommunityGroup);
   const entityShapeConfig = theme.nodes.entityShapes[resolveEntityShape(attrs)];
   const overviewTint = state === "neighbor"
@@ -1044,7 +1045,7 @@ function resolveNodeColor(
     case "muted":
       return zoomTier === "overview"
         ? withAlpha(theme.palette.overview.nodeMuted, 0.42)
-        : String(attrs.mutedColor || withAlpha(semanticColor, theme.nodes.mutedAlpha));
+        : withAlpha(semanticColor, theme.nodes.mutedAlpha);
     case "base":
     default:
       if (zoomTier === "overview") {
@@ -1070,7 +1071,7 @@ function resolveNodeShellColor(
   attrs: NodeAttributes,
   cameraRatio: number,
 ) {
-  const semanticColor = getSemanticNodeColor(attrs, theme);
+  const semanticColor = theme.palette.overview.nodeCore;
   const isCommunityGroup = Boolean(attrs.isCommunityGroup);
   const entityShapeConfig = theme.nodes.entityShapes[resolveEntityShape(attrs)];
   const presenceBoost = getOverviewPresenceBoost(cameraRatio);
@@ -1303,10 +1304,9 @@ function resolveEdgeLodAlpha(
 function resolveNodeRingColor(
   theme: GraphTheme,
   state: GraphNodeVisualState,
-  attrs: NodeAttributes,
 ) {
   if (state === "selected") {
-    return attrs.ringColor || theme.nodes.selectedRing.color;
+    return theme.nodes.selectedRing.color;
   }
   if (state === "hovered") {
     return theme.palette.accent.hovered;
@@ -1582,12 +1582,10 @@ function resolveNodeBorderColor(
   theme: GraphTheme,
   zoomTier: GraphZoomTier,
   state: GraphNodeVisualState,
-  variant: GraphNodeShapeVariant,
-  attrs: NodeAttributes,
   baseColor: string,
 ) {
-  if (state === "selected" || variant === "selected") {
-    return attrs.ringColor || theme.nodes.selectedRing.color;
+  if (state === "selected") {
+    return theme.nodes.selectedRing.color;
   }
   if (state === "hovered") {
     return theme.palette.accent.hovered;
@@ -1597,19 +1595,9 @@ function resolveNodeBorderColor(
   }
   if (state === "muted" || state === "inactive") {
     return withAlpha(
-      attrs.strokeColor || attrs.borderColor || theme.palette.overview.nodeBorder || theme.palette.background.nodeBorder,
+      theme.palette.overview.nodeBorder,
       zoomTier === "overview" ? 0.26 : 0.7,
     );
-  }
-
-  if (variant === "temporal") {
-    return theme.palette.accent.temporal;
-  }
-  if (variant === "provenance") {
-    return theme.palette.accent.provenance;
-  }
-  if (variant === "inferred") {
-    return theme.palette.accent.inferred;
   }
 
   if (zoomTier === "overview") {
@@ -1619,7 +1607,7 @@ function resolveNodeBorderColor(
     );
   }
 
-  return attrs.strokeColor || attrs.borderColor || theme.palette.background.nodeBorder || baseColor;
+  return theme.palette.background.nodeBorder;
 }
 
 export function resolveNodeElementStyle(
@@ -1655,7 +1643,7 @@ export function resolveNodeElementStyle(
     && state !== "inactive",
   );
   const ringSize = resolveNodeRingSize(theme, state, zoomTier);
-  const ringColor = resolveNodeRingColor(theme, state, attrs);
+  const ringColor = resolveNodeRingColor(theme, state);
   const showRing = ringSize > 0;
   const showHalo = state === "hovered" || state === "selected" || state === "path";
   const strokeBase = state === "muted" || state === "inactive"
@@ -1678,7 +1666,7 @@ export function resolveNodeElementStyle(
     label: forceLabel ? label : "",
     zIndex: forceLabel && stateConfig.zIndex === 0 ? 1 : stateConfig.zIndex,
     hidden: false,
-    borderColor: resolveNodeBorderColor(theme, zoomTier, state, nodeVariant, attrs, color),
+    borderColor: resolveNodeBorderColor(theme, zoomTier, state, color),
     borderSize: Math.max(
       0.4,
       Number(attrs.borderSize ?? 0.85)
@@ -1700,7 +1688,7 @@ export function resolveNodeElementStyle(
     ringColor,
     ringSize,
     showHalo,
-    haloColor: attrs.haloColor || attrs.glowColor || withAlpha(
+    haloColor: withAlpha(
       color,
       (isCommunityGroup ? theme.grouped.style.glowAlpha : theme.overlays.hoverGlowAlpha) + variantConfig.haloBoost,
     ),

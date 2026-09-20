@@ -118,6 +118,49 @@ test("native drag selection preserves the camera, while explicitly reselecting t
   assert.equal(viewportCalls.length, 2, "later position updates must not repeat the completed focus");
 });
 
+test("opening an observed property in another ontology selects and centers it after the previous focus completed", async () => {
+  const foreignOntology = "https://other.test/schema/";
+  const foreignProperty = `${foreignOntology}text`;
+  const foreignNodes = [{ id: foreignProperty, type: "owl:DatatypeProperty", content: "文本", properties: { scheme_uri: foreignOntology } }];
+  const context = { configured: true, business_ontologies: [ontology, foreignOntology], support_ontologies: [] };
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input), "http://localhost");
+    const value = url.pathname === "/api/ontology/registry" ? [{ uri: ontology, name: "采购制度" }, { uri: foreignOntology, name: "共享属性" }]
+      : url.pathname.startsWith("/api/ontology/entity/") ? { owning_ontology: ontology }
+        : url.pathname === "/api/ontology/graph" ? url.searchParams.get("uri") === foreignOntology
+          ? { uri: foreignOntology, nodes: foreignNodes, edges: [] } : { uri: ontology, nodes, edges }
+          : url.pathname === "/api/ontology/class-instances" ? { class_uri: requestClass, skip: 0, limit: 1, total: 1, instances: [{ node_id: "request-1", label: "申请", basis: [] }], observed_properties: [{ property_uri: foreignProperty, label: "文本", loaded: true, ontology_uri: foreignOntology, kinds: ["literal"], instance_count: 1 }] }
+            : {};
+    return new Response(JSON.stringify(value));
+  };
+  let store: ReturnType<typeof useStoreApi> | undefined;
+  function CaptureFlowStore() { store = useStoreApi(); return null; }
+  const view = render(<ReactFlowProvider><CaptureFlowStore /><OntologyEditor evidenceContext={context} /></ReactFlowProvider>);
+  const property = await view.findByRole("button", { name: "View property 文本（text）" });
+  const canvas = view.container.querySelector<HTMLElement>(".ontology-editor-flow")!.parentElement!;
+  canvas.getBoundingClientRect = () => new dom.window.DOMRect(0, 0, 900, 600);
+  const viewportCalls: { x: number; y: number; zoom: number }[] = [];
+  store!.getState().panZoom!.setViewport = async (viewport) => { viewportCalls.push(viewport); return viewport; };
+  await act(async () => { store!.getState().triggerNodeChanges(nodes.map((node) => ({ id: node.id, type: "dimensions", dimensions: { width: 180, height: 60 } }))); });
+  await waitFor(() => assert.equal(viewportCalls.length, 1));
+  fireEvent.click(view.getByText("Tools", { selector: "summary" }));
+  fireEvent.click(view.getByRole("checkbox", { name: "Enable advanced editing" }));
+  fireEvent.click(view.getByText("Tools", { selector: "summary" }));
+  assert.ok(view.getByRole("button", { name: "Save draft" }));
+  fireEvent.click(property);
+  await view.findByRole("heading", { name: "Property Details" });
+  await waitFor(() => assert.deepEqual(selectedIds(view.container), [foreignProperty]));
+  await act(async () => { store!.getState().triggerNodeChanges([{ id: foreignProperty, type: "dimensions", dimensions: { width: 180, height: 60 } }]); });
+  await waitFor(() => assert.equal(viewportCalls.length, 2, "the new exact property needs a new focus request"));
+  const viewport = viewportCalls[1];
+  const target = store!.getState().nodeLookup.get(foreignProperty)!;
+  assert.equal((target.internals.positionAbsolute.x + 90) * viewport.zoom + viewport.x, 450);
+  assert.equal((target.internals.positionAbsolute.y + 30) * viewport.zoom + viewport.y, 300);
+  assert.equal(view.getByRole<HTMLSelectElement>("combobox", { name: "Active ontology" }).value, foreignOntology);
+  assert.equal(new URL(dom.window.location.href).searchParams.get("ontologyEntity"), foreignProperty);
+  assert.equal(view.queryByRole("button", { name: "Save draft" }), null, "structural editing is reset for the newly opened ontology");
+});
+
 const supportOntology = "https://example.test/process/Ontology";
 const supportClass = "https://example.test/process/ProcessRule";
 const configuredContext = { configured: true, business_ontologies: [ontology], support_ontologies: [supportOntology] };
