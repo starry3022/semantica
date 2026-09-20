@@ -19,6 +19,13 @@ _PREFIXES = {"rdf": _RDF, "rdfs": _RDFS, "owl": _OWL, "skos": _SKOS}
 _TYPE_KEYS = ("rdf:type", _RDF + "type", "@type")
 _TYPE_EDGES = {"rdf:type", _RDF + "type"}
 _CLASS_TYPES = {_OWL + "Class", _RDFS + "Class"}
+_PROPERTY_TYPES = {
+    _OWL + "ObjectProperty",
+    _OWL + "DatatypeProperty",
+    _OWL + "AnnotationProperty",
+    _RDF + "Property",
+    _RDFS + "Property",
+}
 _SCHEMA_TYPES = {
     _OWL + name
     for name in (
@@ -120,6 +127,39 @@ def _label(node, fallback):
     return fallback
 
 
+def _property_definitions(graph, node):
+    """Resolve field identities without matching local names across ontologies."""
+    base = _namespace(graph)
+    definitions = []
+    for key in _properties(node):
+        uri = _iri(key)
+        if (
+            uri is None
+            and base
+            and isinstance(key, str)
+            and re.fullmatch(r"[\w.-]+", key)
+        ):
+            uri = _iri(base + key)
+        if uri is None:
+            continue
+        target = graph.nodes.get(uri)
+        loaded = target is not None and any(
+            _iri(declared) in _PROPERTY_TYPES
+            for declared, _ in _declarations(graph, target)
+        )
+        owner = _properties(target).get("scheme_uri") if loaded else None
+        definitions.append(
+            {
+                "key": key,
+                "property_uri": uri,
+                "label": _label(target, key) if loaded else key,
+                "loaded": loaded,
+                "ontology_uri": owner if isinstance(owner, str) else None,
+            }
+        )
+    return definitions
+
+
 def _memberships(graph, node):
     declarations = list(_declarations(graph, node))
     if any(_iri(value) in _SCHEMA_TYPES for value, _ in declarations):
@@ -219,6 +259,7 @@ def instance_types(
             "node_id": node_id,
             "status": "declared" if types else "unmapped",
             "types": types,
+            "property_definitions": _property_definitions(session.graph, node),
             "related_concepts": concepts,
             "related_status": related_status,
             "concept_references": references["references"],

@@ -125,7 +125,9 @@ def run(args):
             raise ExportError("Private configuration must specify provider and model.")
         engine = OntologyEngine(**config)
         prompt = engine.llm.build_rdf_prompt(prepared, source_text=text, **options)
-        ontology = engine.from_rdf(prepared, source_text=text, **options)
+        ontology = engine.from_rdf(
+            prepared, source_text=text, generation_mode="business_concepts", **options
+        )
         metadata = _metadata(ontology["metadata"], source_bytes, prompt)
         mode = "llm"
     ontology["metadata"] = {

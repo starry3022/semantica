@@ -42,6 +42,13 @@ export interface InstanceTypesSnapshot {
   node_id: string;
   status: "declared" | "unmapped";
   types: DeclaredInstanceType[];
+  property_definitions?: {
+    key: string;
+    property_uri: string;
+    label: string;
+    loaded: boolean;
+    ontology_uri: string | null;
+  }[];
   related_concepts: {
     class_uri: string;
     label: string;
@@ -107,6 +114,11 @@ function isInstanceTypes(value: unknown): value is InstanceTypesSnapshot {
       && Array.isArray(concept.evidence_ids) && concept.evidence_ids.every((id: unknown) => typeof id === "string"))
     && typeof value.related_status === "string" && ["ready", "unconfigured", "unavailable"].includes(value.related_status)
     && typeof value.notice === "string"
+    && (value.property_definitions === undefined || (Array.isArray(value.property_definitions)
+      && value.property_definitions.every((property: unknown) => isRecord(property)
+        && typeof property.key === "string" && typeof property.property_uri === "string"
+        && typeof property.label === "string" && typeof property.loaded === "boolean"
+        && isNullableString(property.ontology_uri))))
     && (value.concept_references === undefined || (Array.isArray(value.concept_references)
       && value.concept_references.every((reference: unknown) => isConceptReference(reference) && reference.node_id === value.node_id)))
     && (value.concept_reference_issues === undefined || (Array.isArray(value.concept_reference_issues)

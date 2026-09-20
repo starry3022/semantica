@@ -43,21 +43,18 @@ export function InstanceTypesPanel({ nodeId, snapshot, loading, error, showTypes
         </label>
       </section>
       {references.length > 0 || referenceIssues.length > 0 ? <section aria-label="Business concept references" style={{ borderTop: `1px solid ${GRAPH_THEME.ui.surface.divider}`, paddingTop: 10, marginTop: 10 }}>
-        <h4 style={headingStyle}>Business concept{references.length > 1 ? "s" : ""}</h4>
-        <ul style={listStyle}>
-          {references.map((reference) => <li key={reference.class_uri} style={itemStyle}>
-            <button type="button" aria-label={`Open concept ${reference.class_label}`} title={reference.class_uri} style={buttonStyle} disabled={!onOpenOntologyEntity} onClick={() => onOpenOntologyEntity?.(reference.class_uri)}><span>{reference.class_label}</span> <span aria-hidden="true">↗</span></button>
-            <span style={{ ...noteStyle, marginLeft: 8 }}>candidate / unreviewed</span>
-          </li>)}
-        </ul>
         {references.length > 0 ? <details key={`${nodeId}:concept-references`} style={{ marginTop: 4 }}>
-          <summary style={summaryStyle}>Mapping details</summary>
+          <summary style={summaryStyle}>Candidate concept references ({references.length})</summary>
           <p style={noteStyle}>Concept references are not instance declarations or business approval.</p>
-          {references.map((reference) => <div key={reference.class_uri}>
-            <code style={uriStyle}>{reference.class_uri}</code>
-            <p style={noteStyle}>{reference.rationale}</p>
-            <p style={noteStyle}>{reference.evidence_ids.length} evidence reference{reference.evidence_ids.length === 1 ? "" : "s"}</p>
-          </div>)}
+          <ul style={listStyle}>
+            {references.map((reference) => <li key={reference.class_uri} style={itemStyle}>
+              <button type="button" aria-label={`Open concept ${reference.class_label}`} title={reference.class_uri} style={buttonStyle} disabled={!onOpenOntologyEntity} onClick={() => onOpenOntologyEntity?.(reference.class_uri)}><span>{reference.class_label}</span> <span aria-hidden="true">↗</span></button>
+              <span style={{ ...noteStyle, marginLeft: 8 }}>candidate / unreviewed</span>
+              <code style={uriStyle}>{reference.class_uri}</code>
+              <p style={noteStyle}>{reference.rationale}</p>
+              <p style={noteStyle}>{reference.evidence_ids.length} evidence reference{reference.evidence_ids.length === 1 ? "" : "s"}</p>
+            </li>)}
+          </ul>
         </details> : null}
         {referenceIssues.map((issue, index) => <p key={`${issue.class_uri}:${index}`} role="alert" style={noteStyle}>{issue.reason}</p>)}
       </section> : null}

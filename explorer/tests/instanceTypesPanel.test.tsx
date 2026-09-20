@@ -134,20 +134,26 @@ const conceptReference = {
   status: "candidate", review_status: "unreviewed", evidence_ids: ["e-contract"],
 } as const;
 
-test("explicit concept references are visible and navigate separately from declared classes", () => {
+test("candidate concept references stay collapsed behind the actual class and reset on selection", () => {
   const opened: string[] = [];
   const mapped = { ...snapshot, concept_references: [{ ...conceptReference, evidence_ids: ["e-contract"] }], concept_reference_issues: [] };
   const view = render(<InstanceTypesPanel {...baseProps} snapshot={mapped} onOpenOntologyEntity={(uri) => opened.push(uri)} />);
   const concepts = view.getByRole("region", { name: "Business concept references" });
   const declared = view.getByRole("region", { name: "Declared class" });
   assert.equal(within(declared).queryByText("合同"), null);
+  const disclosure = within(concepts).getByText("Candidate concept references (1)").closest("details");
+  assert.ok(disclosure);
+  assert.equal(disclosure.open, false);
+  fireEvent.click(within(concepts).getByText("Candidate concept references (1)"));
   const button = within(concepts).getByRole("button", { name: "Open concept 合同" });
-  assert.equal(button.closest("details"), null, "the concept is visible without expanding technical details");
+  assert.ok(button.closest("details") === disclosure);
   fireEvent.click(button);
   assert.deepEqual(opened, ["https://example.test/business/Contract"]);
   assert.match(concepts.textContent ?? "", /candidate\s*\/\s*unreviewed/i);
   assert.match(concepts.textContent ?? "", /not.*instance declaration/i);
   assert.ok(within(declared).getByText("Process rule"));
+  view.rerender(<InstanceTypesPanel {...baseProps} nodeId="rule-2" snapshot={{ ...mapped, node_id: "rule-2" }} />);
+  assert.equal(view.getByText("Candidate concept references (1)").closest("details")?.open, false);
   view.rerender(<InstanceTypesPanel {...baseProps} nodeId="other" snapshot={mapped} />);
   assert.equal(view.queryByText("合同"), null);
   view.rerender(<InstanceTypesPanel {...baseProps} snapshot={mapped} loading />);
@@ -169,6 +175,7 @@ test("concept labels and rationale remain literal text and have no external HTML
   const html = '<img src=x onerror="window.bad=1">';
   const mapped = { ...snapshot, concept_references: [{ ...conceptReference, class_label: html, rationale: html, evidence_ids: ["e-contract"] }], concept_reference_issues: [] };
   const view = render(<InstanceTypesPanel {...baseProps} snapshot={mapped} onOpenOntologyEntity={undefined} />);
+  fireEvent.click(view.getByText("Candidate concept references (1)"));
   const button = view.getByRole("button", { name: `Open concept ${html}` });
   assert.equal((button as HTMLButtonElement).disabled, true);
   assert.equal(view.container.querySelector("img,script,a[href]"), null);

@@ -74,17 +74,36 @@ class OntologyEngine:
         *,
         source_text: str = "",
         rdf_format: str = "turtle",
+        generation_mode: str = "observed_vocabulary",
         provider: Optional[str] = None,
         model: Optional[str] = None,
         **options,
     ) -> Dict[str, Any]:
-        """Generate an unreviewed LLM ontology proposal from inline RDF or a Graph."""
+        """Describe the observed RDF vocabulary without creating a parallel schema.
+
+        ``business_concepts`` explicitly selects the legacy business proposal
+        and candidate-reference workflow. Neither mode changes the input facts.
+        """
         if options.pop("method", "llm") != "llm":
             raise ValidationError("RDF ontology generation requires method='llm'")
+        if generation_mode not in {"observed_vocabulary", "business_concepts"}:
+            raise ValidationError(
+                "generation_mode must be 'observed_vocabulary' or 'business_concepts'"
+            )
         if provider:
             self.llm.set_provider(provider, model=model)
         elif model is not None:
             options["model"] = model
+        if generation_mode == "observed_vocabulary":
+            from .candidate_ontology import generate_rdf_vocabulary_ontology
+
+            return generate_rdf_vocabulary_ontology(
+                rdf_data,
+                self.llm,
+                source_text=source_text,
+                rdf_format=rdf_format,
+                **options,
+            )
         return self.llm.generate_ontology_from_rdf(
             rdf_data, source_text=source_text, rdf_format=rdf_format, **options
         )

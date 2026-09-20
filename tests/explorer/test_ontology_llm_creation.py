@@ -1,6 +1,8 @@
 """Hub creation consumes the native LLM ontology DTO without reminting terms."""
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -10,6 +12,7 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from semantica.context.context_graph import ContextGraph  # noqa: E402
 from semantica.explorer.app import create_app  # noqa: E402
+from semantica.explorer.routes.ontology import OntologyEntry  # noqa: E402
 from semantica.explorer.session import GraphSession  # noqa: E402
 from semantica.utils.exceptions import ValidationError  # noqa: E402
 
@@ -298,28 +301,30 @@ def test_real_native_rdf_engine_connects_to_hub_with_optional_source(
 ):
     client, session, _ = scene
     doc = "https://example.org/process/doc"
+    class_uri = "https://example.org/process/RequiredDocument"
+    property_uri = "https://example.org/process/name"
     proposal = {
         "classes": [
             {
-                "name": "Contract",
-                "uri": BASE + "Contract",
-                "label": "合同",
-                "comment": "付款申请要求的合同类型。",
+                "name": "RequiredDocument",
+                "uri": class_uri,
+                "label": "材料要求",
+                "comment": "规则所要求的材料，不代表具体合同已存在。",
                 "subClassOf": None,
                 "evidence_nodes": [doc],
-                **({"evidence_lines": [1, 1]} if source_text else {}),
             }
         ],
-        "properties": [],
-        "concept_references": [
+        "properties": [
             {
-                "node_id": doc,
-                "class_uri": BASE + "Contract",
-                "relation": "references_concept",
-                "rationale": "材料要求引用合同概念。",
+                "name": "name",
+                "uri": property_uri,
+                "label": "名称",
+                "comment": "材料要求的原文名称。",
+                "type": "data",
+                "domain": [class_uri],
+                "range": [XSD_STRING],
             }
         ],
-        "unmapped_nodes": [],
     }
     generations = []
 
@@ -337,7 +342,7 @@ def test_real_native_rdf_engine_connects_to_hub_with_optional_source(
             "mode": "data",
             "namespace": BASE,
             "name": "材料候选本体",
-            "sample_data": RDF,
+            "sample_data": RDF + f" <{doc}> a <{class_uri}> .",
             "source_text": source_text,
             "model": "test-model",
         },
@@ -345,17 +350,22 @@ def test_real_native_rdf_engine_connects_to_hub_with_optional_source(
 
     assert response.status_code == 200, response.text
     assert response.json()["uri"] == BASE
-    node = session.get_node(BASE + "Contract")
-    assert node["content"] == "合同"
+    node = session.get_node(class_uri)
+    assert node["content"] == "材料要求"
     assert node["properties"]["fact_status"] == "candidate"
     assert node["properties"]["review_status"] == "unreviewed"
     assert len(generations) == 1
     assert generations[0][1]["model"] == "test-model"
     assert "材料候选本体" in generations[0][0]
     assert doc in generations[0][0]
+    assert session.get_node(property_uri)["content"] == "名称"
+    assert session.get_node(BASE + "Contract") is None
     # Creating a schema does not fabricate a live input node or rdf:type claim.
     assert session.get_node(doc) is None
-    assert session.get_edges()[1] == 0
+    assert all(
+        edge["source"] != doc and edge["target"] != doc
+        for edge in session.get_edges()[0]
+    )
 
 
 def test_malformed_turtle_is_rejected_by_native_engine_without_provider_call(
@@ -384,3 +394,115 @@ def test_malformed_turtle_is_rejected_by_native_engine_without_provider_call(
     assert response.status_code == 422
     assert (session.get_nodes(), session.get_edges()) == before
     assert app.state.ontology_registry == {}
+
+
+@pytest.mark.parametrize("collision", ["class", "property", "ontology", "registry"])
+def test_rdf_generation_rejects_existing_identities_without_partial_mutation(
+    scene, proposal, monkeypatch, collision
+):
+    client, session, app = scene
+    uri, kind = {
+        "class": (BASE + "Document", "owl:Class"),
+        "property": (BASE + "documentName", "owl:DatatypeProperty"),
+        "ontology": (BASE, "owl:Ontology"),
+        "registry": (BASE, "owl:Ontology"),
+    }[collision]
+    if collision == "registry":
+        app.state.ontology_registry[uri] = OntologyEntry(
+            uri=uri,
+            name="Existing reviewed schema",
+            status="external",
+            version="saved-version",
+        )
+    else:
+        session.add_node(
+            uri,
+            kind,
+            "用户编辑的名称",
+            **{
+                "rdfs:label": "用户编辑的名称",
+                "domain_expressions": [
+                    {
+                        "kind": "unionOf",
+                        "members": [BASE + "Document", "urn:other:Role"],
+                    }
+                ],
+            },
+        )
+    before = deepcopy(
+        (session.get_nodes(), session.get_edges(), app.state.ontology_registry)
+    )
+    revision = session._graph_revision
+    stub_engine(monkeypatch, proposal)
+
+    response = client.post(
+        "/api/ontology/create",
+        json={
+            "mode": "data",
+            "namespace": BASE,
+            "name": "New draft",
+            "sample_data": RDF,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "ontology_identity_conflict"
+    assert response.json()["detail"]["conflicts"] == [uri]
+    assert (
+        session.get_nodes(),
+        session.get_edges(),
+        app.state.ontology_registry,
+    ) == before
+    assert session._graph_revision == revision
+
+
+def test_second_rdf_generation_keeps_the_first_complete_draft(
+    scene, proposal, monkeypatch
+):
+    client, session, app = scene
+    stub_engine(monkeypatch, proposal)
+    body = {
+        "mode": "data",
+        "namespace": BASE,
+        "name": "First draft",
+        "sample_data": RDF,
+    }
+    first = client.post("/api/ontology/create", json=body)
+    assert first.status_code == 200, first.text
+    before = deepcopy(
+        (session.get_nodes(), session.get_edges(), app.state.ontology_registry)
+    )
+    second = client.post(
+        "/api/ontology/create", json={**body, "name": "Replacement draft"}
+    )
+    assert second.status_code == 409, second.text
+    assert (
+        session.get_nodes(),
+        session.get_edges(),
+        app.state.ontology_registry,
+    ) == before
+
+
+def test_concurrent_rdf_creates_cannot_claim_the_same_vocabulary(
+    scene, proposal, monkeypatch
+):
+    client, session, app = scene
+    ready = Barrier(2)
+
+    class GenerationBoundary:
+        def __init__(self, **_config):
+            pass
+
+        def from_rdf(self, _data, **_options):
+            ready.wait(timeout=10)
+            return deepcopy(proposal)
+
+    monkeypatch.setattr("semantica.ontology.OntologyEngine", GenerationBoundary)
+    body = {"mode": "data", "namespace": BASE, "name": "Draft", "sample_data": RDF}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(
+            pool.map(lambda _: client.post("/api/ontology/create", json=body), range(2))
+        )
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert list(app.state.ontology_registry) == [BASE]
+    assert session.get_node(BASE + "documentName")["content"] == "材料名称"

@@ -10,6 +10,7 @@ import { InstanceTypesPanel } from "./InstanceTypesPanel";
 import type { InstanceTypesSnapshot } from "./instanceTypes";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 import { getNodeDisplayLabel } from "./nodeDisplayLabels";
+import { propertyDisplayLabel } from "../OntologyWorkspace/propertyDisplayLabel";
 
 export type LinkPrediction = {
   target: string;
@@ -380,6 +381,10 @@ export function GraphInspectorPanel({
   };
   const properties = attributes?.properties ?? {};
   const attribution = sourceAttribution(properties);
+  const propertyDefinitions = new Map(
+    (!instanceTypesLoading && !instanceTypesError && instanceTypes?.node_id === effectiveNodeId
+      ? instanceTypes.property_definitions ?? [] : []).map((definition) => [definition.key, definition]),
+  );
   const accentColor = attributes?.color || "#58a6ff";
   const propertyEntries = Object.entries(properties).filter(
     ([key]) =>
@@ -592,14 +597,24 @@ export function GraphInspectorPanel({
         <div className="node-panel-body">
           {propertyEntries.length ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {propertyEntries.map(([key, value]) => (
+              {propertyEntries.map(([key, value]) => {
+                const definition = propertyDefinitions.get(key);
+                const label = definition?.loaded ? propertyDisplayLabel(definition.property_uri, definition.label) : key;
+                return (
                 <div key={key} style={propertyCardStyle}>
-                  <div style={{ color: GRAPH_THEME.ui.timeline.playhead, fontSize: 11, marginBottom: 4 }}>{key}</div>
+                  <div style={{ color: GRAPH_THEME.ui.timeline.playhead, fontSize: 11, marginBottom: 4 }}>
+                    {definition?.loaded && onOpenOntologyEntity
+                      ? <button type="button" aria-label={`View property ${label}`} title={definition.property_uri}
+                        onClick={() => onOpenOntologyEntity(definition.property_uri)}
+                        style={{ color: "inherit", font: "inherit", padding: 0, border: 0, background: "transparent", cursor: "pointer", textAlign: "left", overflowWrap: "anywhere" }}>{label}</button>
+                      : <span title={definition?.property_uri}>{label}</span>}
+                  </div>
                   <div style={{ color: GRAPH_THEME.ui.text.body, fontSize: 13, wordBreak: "break-word" }}>
                     {typeof value === "object" ? JSON.stringify(value) : String(value)}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div style={emptyTextStyle}>No additional properties are attached to this node.</div>

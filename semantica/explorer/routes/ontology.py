@@ -1815,13 +1815,41 @@ async def create_ontology(
         tags=body.tags,
     )
     try:
-        nodes_added, edges_added = await asyncio.to_thread(
-            session.add_nodes_and_edges, nodes, edges
-        )
+        if body.mode == "data":
+
+            def add_rdf_draft():
+                # Match GraphSession's write-lock order and keep the identity
+                # check, insertion and registration indivisible to other creates.
+                with session._lock:
+                    registry = _get_registry(request)
+                    conflicts = sorted(
+                        node["id"]
+                        for node in nodes
+                        if node["id"] in registry
+                        or session.get_node(node["id"]) is not None
+                    )
+                    if conflicts:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "code": "ontology_identity_conflict",
+                                "message": "This draft reuses existing ontology or term IRIs. Review or edit the existing ontology instead.",
+                                "conflicts": conflicts,
+                            },
+                        )
+                    added = session.add_nodes_and_edges(nodes, edges)
+                    registry[onto_uri] = entry
+                    return added
+
+            nodes_added, edges_added = await asyncio.to_thread(add_rdf_draft)
+        else:
+            nodes_added, edges_added = await asyncio.to_thread(
+                session.add_nodes_and_edges, nodes, edges
+            )
+            _get_registry(request)[onto_uri] = entry
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    _get_registry(request)[onto_uri] = entry
     return LoadOntologyResponse(
         uri=onto_uri,
         name=body.name,

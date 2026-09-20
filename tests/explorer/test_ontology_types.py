@@ -60,6 +60,76 @@ def read_types(scene, node_id=RULE):
     return response.json()
 
 
+def test_property_definitions_use_exact_predicate_identity_and_do_not_mutate_facts(
+    scene,
+):
+    graph = scene[1]
+    graph.nodes[RULE].properties["name"] = "财务负责人"
+    graph.add_node(BASE + "name", "owl:DatatypeProperty", "名称", scheme_uri=BASE)
+    graph.add_node(
+        BUSINESS + "name", "owl:DatatypeProperty", "业务名称", scheme_uri=BUSINESS
+    )
+    graph.add_node(
+        BASE + "fact_status", "owl:DatatypeProperty", "知识状态", scheme_uri=BASE
+    )
+    before = deepcopy(graph.to_dict())
+    definitions = {row["key"]: row for row in read_types(scene)["property_definitions"]}
+    assert definitions["name"] == {
+        "key": "name",
+        "property_uri": BASE + "name",
+        "label": "名称",
+        "loaded": True,
+        "ontology_uri": BASE,
+    }
+    assert definitions["fact_status"]["label"] == "知识状态"
+    assert definitions["review_status"]["loaded"] is False
+    assert graph.to_dict() == before
+    graph.nodes[BASE + "name"].content = "角色名称"
+    assert (
+        next(
+            row
+            for row in read_types(scene)["property_definitions"]
+            if row["key"] == "name"
+        )["label"]
+        == "角色名称"
+    )
+
+
+def test_property_iris_resolve_without_namespace_but_local_fields_never_guess(scene):
+    graph = scene[1]
+    graph.metadata = {}
+    graph.nodes[RULE].properties[BUSINESS + "name"] = "财务负责人"
+    graph.nodes[RULE].properties["name"] = "财务负责人"
+    graph.add_node(
+        BUSINESS + "name", "owl:DatatypeProperty", "业务名称", scheme_uri=BUSINESS
+    )
+    definitions = {row["key"]: row for row in read_types(scene)["property_definitions"]}
+    assert definitions[BUSINESS + "name"]["property_uri"] == BUSINESS + "name"
+    assert definitions[BUSINESS + "name"]["label"] == "业务名称"
+    assert "name" not in definitions
+
+
+@pytest.mark.parametrize(
+    "key", ["../name", "unknown:name", "javascript:alert(1)", "bad key", "<img>"]
+)
+def test_invalid_or_unresolved_property_keys_cannot_borrow_a_schema_identity(
+    scene, key
+):
+    scene[1].nodes[RULE].properties[key] = "candidate"
+    assert key not in {row["key"] for row in read_types(scene)["property_definitions"]}
+
+
+def test_a_class_with_the_same_iri_is_not_a_property_definition(scene):
+    scene[1].add_node(BASE + "fact_status", "owl:Class", "误导标签")
+    row = next(
+        row
+        for row in read_types(scene)["property_definitions"]
+        if row["key"] == "fact_status"
+    )
+    assert row["loaded"] is False
+    assert row["label"] == "fact_status"
+
+
 def test_loaded_candidate_namespace_connects_an_instance_to_its_exact_support_class(
     scene,
 ):

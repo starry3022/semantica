@@ -284,7 +284,12 @@ def test_engine_dispatches_rdf_to_llm_and_keeps_dict_heuristics(proposal):
         factory.return_value.generate_structured.return_value = proposal
         engine = OntologyEngine(model="test-model")
         for rdf_input in (RDF_TEXT, Graph().parse(data=RDF_TEXT, format="turtle")):
-            result = engine.from_data(rdf_input, source_text=TEXT, base_uri=BASE)
+            result = engine.from_data(
+                rdf_input,
+                source_text=TEXT,
+                base_uri=BASE,
+                generation_mode="business_concepts",
+            )
             assert result["metadata"]["input_kind"] == "rdf"
         dictionary = {
             "entities": [{"id": "one", "type": "Person"}],
@@ -460,6 +465,7 @@ def test_engine_from_rdf_forwards_provider_and_options_without_using_heuristics(
     engine.generator = MagicMock()
     engine.from_rdf(
         RDF_TEXT,
+        generation_mode="business_concepts",
         provider="custom",
         model="new-model",
         source_text=TEXT,
