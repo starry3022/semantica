@@ -8,6 +8,7 @@ Usage::
 
     semantica-explorer --graph my_graph.json --port 8000
     python -m semantica.explorer --graph my_graph.json
+    python -m semantica.explorer --bundle candidate-artifacts --port 8020
 """
 
 import argparse
@@ -27,10 +28,14 @@ def main(argv=None):
         prog="semantica-explorer",
         description="Semantica Knowledge Explorer — interactive dashboard for KG exploration",
     )
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--graph", "-g",
-        required=True,
         help="Path to a ContextGraph JSON file to load.",
+    )
+    inputs.add_argument(
+        "--bundle",
+        help="Path to a portable candidate facts and ontology artifact directory.",
     )
     parser.add_argument(
         "--source-manifest",
@@ -53,10 +58,11 @@ def main(argv=None):
         help="Do not open the browser automatically.",
     )
     args = parser.parse_args(argv)
-
+    if args.bundle and args.source_manifest:
+        parser.error("--source-manifest cannot be combined with --bundle.")
 
     import os
-    if not os.path.isfile(args.graph):
+    if args.graph and not os.path.isfile(args.graph):
         _err.print(f"[bold red]Error:[/bold red] graph file not found: {args.graph}")
         sys.exit(1)
 
@@ -72,29 +78,40 @@ def main(argv=None):
     from .session import GraphSession
     from .app import create_app
 
-    with _out.status("[dim]Loading graph…[/dim]", spinner="dots"):
-        session = GraphSession.from_file(args.graph)
-    stats = session.get_stats()
+    if args.bundle:
+        from .candidate_bundle import create_bundle_app
+
+        try:
+            with _out.status("[dim]Loading candidate bundle…[/dim]", spinner="dots"):
+                app = create_bundle_app(args.bundle)
+            stats = app.state.session.get_stats()
+        except Exception:
+            _err.print("[bold red]Error:[/bold red] invalid or unreadable candidate bundle.")
+            sys.exit(1)
+    else:
+        with _out.status("[dim]Loading graph…[/dim]", spinner="dots"):
+            session = GraphSession.from_file(args.graph)
+
+        source_resources = None
+        if args.source_manifest:
+            from pathlib import Path
+
+            from .source_resources import SourceResourceRegistry
+
+            try:
+                source_resources = SourceResourceRegistry.from_manifest(
+                    Path(args.source_manifest)
+                )
+            except (OSError, ValueError) as error:
+                _err.print(f"[bold red]Error:[/bold red] invalid source manifest: {error}")
+                sys.exit(1)
+        app = create_app(session=session, source_resources=source_resources)
+        stats = session.get_stats()
     _out.print(
         f"[bold green]✓[/bold green] Graph loaded — "
         f"[cyan]{stats.get('node_count', 0)}[/cyan] nodes, "
         f"[cyan]{stats.get('edge_count', 0)}[/cyan] edges"
     )
-
-    source_resources = None
-    if args.source_manifest:
-        from pathlib import Path
-
-        from .source_resources import SourceResourceRegistry
-
-        try:
-            source_resources = SourceResourceRegistry.from_manifest(
-                Path(args.source_manifest)
-            )
-        except (OSError, ValueError) as error:
-            _err.print(f"[bold red]Error:[/bold red] invalid source manifest: {error}")
-            sys.exit(1)
-    app = create_app(session=session, source_resources=source_resources)
 
     url = f"http://{args.host}:{args.port}"
 

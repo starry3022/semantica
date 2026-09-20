@@ -1,4 +1,155 @@
-# Candidate facts: native technical validation
+# Candidate facts: extraction, RDF, ontology and Explorer
+
+The primary source-to-graph workflow uses the native LLM entity and relationship
+entrypoints with the opt-in `candidate_facts` profile. The LLM proposes domain
+types and relationships; code assigns source-scoped IDs and checks references
+and citations. One candidate-facts dictionary feeds RDFExporter and the LLM
+OntologyGenerator, followed by technical validation:
+
+```text
+UTF-8 source → extract_entities_llm → extract_relations_llm
+                              ↓
+                    entities / relationships
+                      ↙                 ↘
+              RDFExporter       OntologyGenerator(method="llm")
+               base RDF              ontology draft
+                      ↘                 ↙
+                      validate_graph → issues
+```
+
+`candidate_facts` is an extension in this branch to the native extraction APIs.
+Their existing default mode remains available. The specialized
+`semantic_extract/process_graph.py` module is another branch extension for
+structured process rules; this primary workflow does not invoke it or use its
+fixed business classes. A class named `Role` in this workflow is a model
+proposal, not a compulsory type defined by that process-rule module.
+
+## Run from any checkout
+
+Use Python 3.12 and install the project's existing `llm-openai`, `shacl` and
+`explorer` extras in your environment. Use the corresponding existing provider
+extra for a different provider. No new dependency is introduced by this workflow.
+Build the Explorer frontend once from the checkout:
+
+```sh
+python -m pip install -e '.[llm-openai,shacl,explorer]'
+cd explorer
+npm ci
+npm run build
+cd ..
+```
+
+Keep a private provider configuration outside the output directory and Git:
+
+```json
+{
+  "provider": "openai",
+  "model": "YOUR_MODEL",
+  "api_key": "YOUR_KEY",
+  "max_tokens": 16000,
+  "temperature": 0
+}
+```
+
+An OpenAI-compatible gateway can also specify `base_url`. Provider credentials
+are never saved in the artifact bundle. Source text is sent to the configured
+model during generation; replay and serving do not call a model.
+
+From the repository root:
+
+```sh
+python examples/extract_candidate_facts.py \
+  --source /path/to/policy.txt --source-id policy-001 \
+  --title '采购管理制度' --version V1.3 \
+  --config /private/provider.json --output /path/to/new-bundle
+
+SEMANTICA_ALLOW_ANONYMOUS=true python -m semantica.explorer \
+  --bundle /path/to/new-bundle --port 8020 --no-browser
+```
+
+The server binds to loopback by default. Open `http://127.0.0.1:8020`. Use a
+different free port if that address already hosts another session. A missing
+`--version` stays unknown; the CLI does not manufacture version metadata.
+
+In Knowledge Explorer, select a candidate entity, open its declared class in
+Ontology Hub, or use **Open source material** to inspect explicit evidence.
+The class and property identities come from the actual base RDF. Only one
+ontology draft is registered. Evidence and source nodes are a provenance display
+overlay, not a second business ontology. Relations with several evidence items
+expose each item through the existing source viewer.
+
+Copy the **whole bundle directory** to another machine; paths inside it are
+relative. Only the code checkout, installed dependencies, built frontend and the
+bundle are needed for viewing. Private model configuration is needed only when
+generating new content. Replay verifies source, prompts, recorded model responses
+and ontology identity, and reruns technical validation without a model call:
+
+```sh
+python examples/extract_candidate_facts.py \
+  --replay /path/to/copied-bundle --output /path/to/new-replay
+```
+
+Generation publishes a complete bundle atomically and refuses a nonempty output
+directory. Explorer checks file hashes and rejects path traversal and symlinks.
+The bundle contains `source.txt`, `source-manifest.json`, `facts.json`,
+`extraction.json`, `extraction-issues.json`, entity/relationship/ontology prompt
+files, `base.ttl`, `ontology.json`, `ontology.ttl`, `shapes.ttl`, `issues.json`,
+`candidate-graph.json` and `SUMMARY.json`. `extraction.json` records typed model
+JSON, not raw HTTP response bytes. Checksums show consistency, not authenticity.
+
+The code belongs to `feat/opt-0917`, regardless of whether a checkout lives in
+`.local/worktrees/opt-0917` or a normal directory. `.local/worktrees` is just a
+Git worktree location. Do not copy that directory's `.git` pointer to another
+computer. Fetch/checkout the branch after it has been published, or transfer
+local commits explicitly with Git's bundle format:
+
+```sh
+# On the machine containing the branch; no push is performed:
+git bundle create /path/to/opt-0917.bundle feat/opt-0917
+# On another machine:
+git clone -b feat/opt-0917 /path/to/opt-0917.bundle semantica
+```
+
+Runtime artifacts are separate from code and must be copied explicitly or
+regenerated with the tracked command above. There is no dependency on a local
+startup script, another worktree, or a developer's absolute filesystem path.
+
+## Evidence and semantic limits
+
+The `candidate-facts-extraction-v3` prompt embeds its response schema and supplies
+numbered original lines. It also works without the optional instructor package. The
+model selects supporting line intervals; code extracts the exact quote and
+computes Unicode offsets without asking the model to count characters. Original
+line endings are preserved. Explicit quote/character claims remain supported;
+conflicting line and character claims are rejected as a location and retained
+for review, never silently repaired.
+
+Entity IDs are stable when replaying the same recorded extraction. Model-local
+IDs can be reassigned when the same document is extracted again, so a fresh run
+is an independent candidate bundle. Do not carry review decisions across runs
+or merge entities using these IDs alone.
+
+The profile accepts one document of at most 32,000 Unicode code points and does
+not silently chunk, fall back to pattern extraction, fuzzily relink endpoints or
+invent missing entities. Unknown endpoints remain in the recorded response and
+appear in the extraction issue list, rather than being added as synthetic facts.
+Missing evidence and invalid offsets/quotes remain explicit. Citation alignment
+does not verify the relation's business meaning or upgrade candidate/unreviewed
+status. All source text remains plain text in the source viewer.
+
+The LLM chooses types, labels and definitions; it can still miss entities or
+choose a poor abstraction. A role selector is not a named person and a document
+requirement is not a concrete existing contract. These are prompt requirements,
+not claims of perfect extraction. Review `extraction-issues.json`,
+`ontology.json` uncertainties and the technical report.
+
+Native RDFExporter emits base entity/relation triples. Explicit evidence and
+conditional/negative/modality qualifiers remain in `facts.json`, typed responses
+and the Explorer overlay; they are not serialized as qualified RDF assertions.
+Keep those files when transferring the result. The base RDF alone is not a
+lossless policy representation and is not an executable approval engine.
+
+## Existing candidate-fact input
 
 The same `entities` / `relationships` dictionary feeds two native components:
 

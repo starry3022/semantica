@@ -1178,6 +1178,13 @@ def extract_entities_llm(
         max_text_length: Maximum text length before auto-chunking. None = provider default.
         **kwargs: Additional options
     """
+    if kwargs.get("extraction_profile") == "candidate_facts":
+        from .candidate_profile import extract_candidate_entities
+
+        return extract_candidate_entities(
+            text, provider=provider, model=kwargs.pop("llm_model", model),
+            max_text_length=max_text_length, **kwargs,
+        )
     # Support llm_model parameter to disambiguate from ML model
     if "llm_model" in kwargs:
         model = kwargs.pop("llm_model")
@@ -1933,6 +1940,13 @@ def extract_relations_llm(
             produces a warning log but is not suppressed. Default False.
         **kwargs: Additional options
     """
+    if kwargs.get("extraction_profile") == "candidate_facts":
+        from .candidate_profile import extract_candidate_relations
+
+        return extract_candidate_relations(
+            text, entities, provider=provider, model=kwargs.pop("llm_model", model),
+            max_text_length=max_text_length, max_retries=max_retries, **kwargs,
+        )
     # Support llm_model parameter to disambiguate from ML model
     if "llm_model" in kwargs:
         model = kwargs.pop("llm_model")
