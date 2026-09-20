@@ -152,6 +152,178 @@ def test_loaded_candidate_namespace_connects_an_instance_to_its_exact_support_cl
     assert scene[1].to_dict() == before
 
 
+def test_object_properties_group_finance_targets_and_preserve_parallel_outgoing_edges(
+    scene,
+):
+    client, graph, _ = scene
+    graph.metadata = {}
+    finance_class = BUSINESS + "FinanceHead"
+    approves = BUSINESS + "approves"
+    graph.add_node(finance_class, "owl:Class", "财务负责人", scheme_uri=BUSINESS)
+    graph.nodes[RULE].node_type = finance_class
+    graph.nodes[RULE].content = "财务负责人"
+    graph.add_node(approves, "owl:ObjectProperty", "审批", scheme_uri=BUSINESS)
+    graph.add_node("urn:payment", BUSINESS_CLASS, "供应商付款申请")
+    graph.add_node("urn:purchase", BUSINESS_CLASS, "采购申请")
+    graph.add_node("urn:other-finance", finance_class, "另一财务负责人")
+    graph.add_edge(RULE, "urn:purchase", approves, id="purchase-b")
+    graph.add_edge(RULE, "urn:purchase", approves, id="purchase-a")
+    graph.add_edge(RULE, "urn:payment", approves, id="payment")
+    graph.add_edge("urn:other-finance", RULE, approves, id="incoming")
+    graph.add_edge(
+        "urn:other-finance", "urn:payment", BUSINESS + "otherPredicate", id="other-only"
+    )
+    before = deepcopy(graph.to_dict())
+    assert read_types(scene)["object_properties"] == [
+        {
+            "property_uri": approves,
+            "label": "审批",
+            "loaded": True,
+            "ontology_uri": BUSINESS,
+            "targets": [
+                {"node_id": "urn:payment", "label": "供应商付款申请", "edge_ids": ["payment"]},
+                {
+                    "node_id": "urn:purchase",
+                    "label": "采购申请",
+                    "edge_ids": ["purchase-a", "purchase-b"],
+                },
+            ],
+        }
+    ]
+    observed = client.get(INSTANCES, params={"class_uri": finance_class}).json()[
+        "observed_properties"
+    ]
+    assert (
+        next(row for row in observed if row["property_uri"] == approves)[
+            "instance_count"
+        ]
+        == 2
+    )
+    assert BUSINESS + "otherPredicate" in {row["property_uri"] for row in observed}
+    assert graph.to_dict() == before
+
+
+@pytest.mark.parametrize("with_namespace", [False, True])
+def test_object_properties_share_exact_iri_rules_with_class_usage(
+    scene, with_namespace
+):
+    client, graph, _ = scene
+    if not with_namespace:
+        graph.metadata = {}
+    graph.nodes[RULE].node_type = RULE_CLASS
+    graph.add_node("urn:target", BUSINESS_CLASS, "目标")
+    graph.add_node("urn:target:second-source", BUSINESS_CLASS, "目标")
+    graph.add_node(BASE + "approves", "owl:ObjectProperty", "本地审批", scheme_uri=BASE)
+    graph.add_node(
+        BUSINESS + "approves", "owl:ObjectProperty", "其他审批", scheme_uri=BUSINESS
+    )
+    graph.add_node(
+        BUSINESS + "hasEvidence", "owl:ObjectProperty", "其他本体的证据关系", scheme_uri=BUSINESS
+    )
+    for edge_id, predicate in {
+        "local": "approves",
+        "foreign": BUSINESS + "approves",
+        "unknown": "urn:unloaded:relation",
+        "foreign-evidence": BUSINESS + "hasEvidence",
+        "foreign-type": BUSINESS + "type",
+        "overlay": "hasEvidence",
+        "source-overlay": "fromSource",
+        "type": "rdf:type",
+        "expanded-type": RDF_TYPE,
+        "invalid": "javascript:alert(1)",
+        "unknown-prefix": "unregistered:approves",
+    }.items():
+        graph.add_edge(RULE, "urn:target", predicate, id=edge_id)
+    graph.add_edge(
+        RULE,
+        "urn:target:second-source",
+        BUSINESS + "approves",
+        id="foreign-second-source",
+    )
+    properties = read_types(scene)["object_properties"]
+    by_uri = {row["property_uri"]: row for row in properties}
+    expected = {
+        BUSINESS + "approves",
+        BUSINESS + "hasEvidence",
+        BUSINESS + "type",
+        "urn:unloaded:relation",
+    }
+    if with_namespace:
+        expected.add(BASE + "approves")
+        assert by_uri[BASE + "approves"]["label"] == "本地审批"
+    assert set(by_uri) == expected
+    assert by_uri[BUSINESS + "approves"]["label"] == "其他审批"
+    assert by_uri[BUSINESS + "approves"]["targets"] == [
+        {"node_id": "urn:target", "label": "目标", "edge_ids": ["foreign"]},
+        {
+            "node_id": "urn:target:second-source",
+            "label": "目标",
+            "edge_ids": ["foreign-second-source"],
+        },
+    ]
+    assert by_uri["urn:unloaded:relation"] == {
+        "property_uri": "urn:unloaded:relation",
+        "label": "urn:unloaded:relation",
+        "loaded": False,
+        "ontology_uri": None,
+        "targets": [{"node_id": "urn:target", "label": "目标", "edge_ids": ["unknown"]}],
+    }
+    observed = client.get(INSTANCES, params={"class_uri": RULE_CLASS}).json()[
+        "observed_properties"
+    ]
+    assert {
+        row["property_uri"] for row in observed if "object" in row["kinds"]
+    } == expected
+    assert all(row["instance_count"] == 1 for row in observed)
+
+
+def test_object_properties_preserve_explicit_legacy_relations_without_borrowing_foreign_definitions(
+    scene,
+):
+    graph = scene[1]
+    graph.add_node("urn:target", BUSINESS_CLASS, "目标")
+    graph.add_node(
+        BASE + "hasEvidence", "owl:ObjectProperty", "旧图证据谓词", scheme_uri=BASE
+    )
+    graph.add_node(
+        BUSINESS + "fromSource", "owl:ObjectProperty", "外部来源关系", scheme_uri=BUSINESS
+    )
+    graph.add_edge(RULE, "urn:target", "hasEvidence", id="declared-short")
+    graph.add_edge(RULE, "urn:target", "fromSource", id="unresolved-short")
+    properties = read_types(scene)["object_properties"]
+    assert properties == [
+        {
+            "property_uri": BASE + "hasEvidence",
+            "label": "旧图证据谓词",
+            "loaded": True,
+            "ontology_uri": BASE,
+            "targets": [
+                {"node_id": "urn:target", "label": "目标", "edge_ids": ["declared-short"]}
+            ],
+        }
+    ]
+
+
+def test_object_properties_queries_use_only_the_current_nodes_outgoing_edges(scene):
+    graph = scene[1]
+    graph.add_node("urn:other", BUSINESS_CLASS, "其他节点")
+    graph.add_node("urn:target", BUSINESS_CLASS, "目标")
+    graph.add_edge(RULE, "urn:other", BUSINESS + "first", id="first-edge")
+    graph.add_edge("urn:other", "urn:target", BUSINESS + "second", id="second-edge")
+    first = read_types(scene)["object_properties"]
+    other = read_types(scene, "urn:other")["object_properties"]
+    assert [row["property_uri"] for row in first] == [BUSINESS + "first"]
+    assert [row["property_uri"] for row in other] == [BUSINESS + "second"]
+    assert other[0]["targets"] == [
+        {"node_id": "urn:target", "label": "目标", "edge_ids": ["second-edge"]}
+    ]
+    assert read_types(scene, "urn:target")["object_properties"] == []
+    graph.nodes["urn:other"].content = "更新后的目标名称"
+    assert (
+        read_types(scene)["object_properties"][0]["targets"][0]["label"] == "更新后的目标名称"
+    )
+
+
 def test_observed_properties_use_all_explicit_instances_without_declaring_domains(
     scene,
 ):

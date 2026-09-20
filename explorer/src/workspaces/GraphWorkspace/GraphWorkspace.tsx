@@ -1086,12 +1086,15 @@ function buildSelectedEdgeState(
   edgeId: string,
   displayGraph: typeof graph | Graph<NodeAttributes, EdgeAttributes>,
 ): GraphSelectedEdgeState | null {
-  if (!edgeId || !displayGraph.hasEdge(edgeId)) {
+  // Property values select original relationships even when the canvas bundles
+  // or hides them. Canvas selections still use their displayed bundle attributes.
+  const selectedGraph = displayGraph.hasEdge(edgeId) ? displayGraph : graph;
+  if (!edgeId || !selectedGraph.hasEdge(edgeId)) {
     return null;
   }
 
-  const [displaySourceId, displayTargetId] = displayGraph.extremities(edgeId);
-  const attributes = displayGraph.getEdgeAttributes(edgeId) as {
+  const [displaySourceId, displayTargetId] = selectedGraph.extremities(edgeId);
+  const attributes = selectedGraph.getEdgeAttributes(edgeId) as {
     edgeType?: string;
     weight?: number;
     properties?: Record<string, unknown>;
@@ -3496,6 +3499,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                       showInstanceTypes={showInstanceTypes}
                       onShowInstanceTypes={handleShowInstanceTypes}
                       onOpenOntologyEntity={onOpenOntologyEntity}
+                      onInspectRelationship={handleEdgeSelect}
                       onMarkdownApplied={handleMarkdownApplied}
                       onMarkdownDirtyChange={handleMarkdownDirtyChange}
                     />

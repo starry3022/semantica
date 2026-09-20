@@ -162,6 +162,66 @@ def _property_definitions(graph, node):
     return definitions
 
 
+def _outgoing_property_edges(graph, node_id):
+    """Resolve only this node's explicit outgoing predicates, excluding rdf:type."""
+    base = _namespace(graph)
+    for edge in graph._adjacency.get(node_id, []):
+        if edge.source_id != node_id:
+            continue
+        uri = _iri(edge.edge_type)
+        if (
+            uri is None
+            and base
+            and isinstance(edge.edge_type, str)
+            and re.fullmatch(r"[\w.-]+", edge.edge_type)
+        ):
+            candidate = _iri(base + edge.edge_type)
+            # A bare relation name is not enough to turn a display edge
+            # into an RDF assertion; require its exact loaded definition.
+            if (
+                candidate
+                and _property_definition(graph, edge.edge_type, candidate)["loaded"]
+            ):
+                uri = candidate
+        if uri is not None and uri != _RDF + "type":
+            yield edge, _property_definition(graph, uri, uri)
+
+
+def _object_properties(graph, node_id):
+    """Group outgoing RDF values by predicate and target, preserving edge identity."""
+    properties = {}
+    for edge, definition in _outgoing_property_edges(graph, node_id):
+        if not isinstance(edge.target_id, str):
+            continue
+        row = properties.setdefault(
+            definition["property_uri"],
+            {
+                **{key: value for key, value in definition.items() if key != "key"},
+                "targets": {},
+            },
+        )
+        target = row["targets"].setdefault(
+            edge.target_id,
+            {
+                "node_id": edge.target_id,
+                "label": _label(graph.nodes.get(edge.target_id), edge.target_id),
+                "edge_ids": set(),
+            },
+        )
+        if isinstance(edge.edge_id, str):
+            target["edge_ids"].add(edge.edge_id)
+    return [
+        {
+            **properties[uri],
+            "targets": [
+                {**target, "edge_ids": sorted(target["edge_ids"])}
+                for _, target in sorted(properties[uri]["targets"].items())
+            ],
+        }
+        for uri in sorted(properties)
+    ]
+
+
 def _observed_properties(graph, node_ids):
     """Summarize predicate usage without adding domain or required constraints."""
     # Unqualified display/state keys need an exact loaded predicate definition.
@@ -186,7 +246,6 @@ def _observed_properties(graph, node_ids):
         "confidence",
     }
     observed = {}
-    base = _namespace(graph)
 
     def record(definition, node_id, kind):
         uri = definition["property_uri"]
@@ -214,26 +273,8 @@ def _observed_properties(graph, node_ids):
             values = value if isinstance(value, list) else [value]
             if any(isinstance(item, (str, int, float, bool)) for item in values):
                 record(definition, node_id, "literal")
-        for edge in graph._adjacency.get(node_id, []):
-            if edge.source_id != node_id:
-                continue
-            uri = _iri(edge.edge_type)
-            if (
-                uri is None
-                and base
-                and isinstance(edge.edge_type, str)
-                and re.fullmatch(r"[\w.-]+", edge.edge_type)
-            ):
-                candidate = _iri(base + edge.edge_type)
-                # A bare relation name is not enough to turn a display edge
-                # into an RDF assertion; require its exact loaded definition.
-                if (
-                    candidate
-                    and _property_definition(graph, edge.edge_type, candidate)["loaded"]
-                ):
-                    uri = candidate
-            if uri is not None:
-                record(_property_definition(graph, uri, uri), node_id, "object")
+        for _, definition in _outgoing_property_edges(graph, node_id):
+            record(definition, node_id, "object")
     return [
         {
             **{
@@ -348,6 +389,7 @@ def instance_types(
             "status": "declared" if types else "unmapped",
             "types": types,
             "property_definitions": _property_definitions(session.graph, node),
+            "object_properties": _object_properties(session.graph, node_id),
             "related_concepts": concepts,
             "related_status": related_status,
             "concept_references": references["references"],

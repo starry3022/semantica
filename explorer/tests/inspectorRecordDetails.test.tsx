@@ -38,7 +38,7 @@ test.beforeEach(() => {
 });
 test.afterEach(() => graph.clear());
 
-test("candidate record metadata is separate from same-IRI class properties without mutating the node", () => {
+test("candidate status stays beside identity without a separate record panel or graph mutation", () => {
   const before = JSON.stringify(graph.export());
   const document = render();
   const properties = section(document, "Properties");
@@ -49,12 +49,11 @@ test("candidate record metadata is separate from same-IRI class properties witho
   for (const value of ["fact_status", "review_status", "rdf:type", "candidate", "unreviewed"]) {
     assert.equal(properties.textContent?.includes(value), false);
   }
-  const record = section(document, "Record details");
-  assert.ok(record);
-  assert.equal(record.hasAttribute("open"), false);
-  assert.ok(record.textContent?.includes("candidate"));
-  assert.ok(record.textContent?.includes("unreviewed"));
-  assert.ok(record.textContent?.includes(ns + "FinanceHead"));
+  assert.equal(section(document, "Record details"), undefined);
+  const status = document.querySelector('[aria-label="Review status"]');
+  assert.ok(status?.textContent?.includes("candidate"));
+  assert.ok(status?.textContent?.includes("unreviewed"));
+  assert.ok(section(document, "Node identifier")?.textContent?.includes(ns + "FinanceHead"));
   assert.equal(JSON.stringify(graph.export()), before);
 });
 
@@ -63,8 +62,8 @@ test("old graphs with explicitly identified governance predicates keep them alon
   const properties = section(document, "Properties")!;
   assert.ok(properties.querySelector(`button[title="${ns}fact_status"]`));
   assert.ok(properties.querySelector(`button[title="${ns}review_status"]`));
-  const record = section(document, "Record details")!;
-  assert.equal(record.textContent?.includes("unreviewed"), false);
+  assert.equal(section(document, "Record details"), undefined);
+  assert.equal(document.querySelector('[aria-label="Review status"]'), null);
 });
 
 test("all supported type declaration keys stay out of the business property list", () => {
@@ -72,7 +71,7 @@ test("all supported type declaration keys stay out of the business property list
     graph.setNodeAttribute("finance", "properties", { [key]: ns + "FinanceHead" });
     const document = render();
     assert.equal(section(document, "Properties")?.textContent?.includes(ns + "FinanceHead"), false);
-    assert.ok(section(document, "Record details")?.textContent?.includes(ns + "FinanceHead"));
+    assert.ok(section(document, "Node identifier")?.textContent?.includes(ns + "FinanceHead"));
   }
 });
 
@@ -81,7 +80,7 @@ test("missing or stale definitions do not hide values or reuse another node's li
     const document = render(current);
     assert.equal(section(document, "Properties")?.querySelectorAll("button[title]").length, 0);
     assert.ok(document.body.textContent?.includes("财务负责人"));
-    assert.ok(section(document, "Record details")?.textContent?.includes("unreviewed"));
+    assert.ok(document.querySelector('[aria-label="Review status"]')?.textContent?.includes("unreviewed"));
   }
 });
 
@@ -90,9 +89,9 @@ test("namespace-qualified but unloaded status definitions remain record metadata
   const properties = section(document, "Properties")!;
   assert.equal(properties.textContent?.includes("candidate"), false);
   assert.equal(properties.textContent?.includes("unreviewed"), false);
-  const record = section(document, "Record details")!;
-  assert.ok(record.textContent?.includes("candidate"));
-  assert.ok(record.textContent?.includes("unreviewed"));
+  const status = document.querySelector('[aria-label="Review status"]');
+  assert.ok(status?.textContent?.includes("candidate"));
+  assert.ok(status?.textContent?.includes("unreviewed"));
 });
 
 test("explicit schema properties are not hidden just because their short keys resemble metadata", () => {

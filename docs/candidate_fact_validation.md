@@ -86,10 +86,22 @@ Hub's class property list also shows predicates actually used by the class's
 explicit instances, joined to the same full property IRI used in Explorer.
 Observed usage is labeled separately from a domain declaration and does not
 make a property mandatory or add an ontology constraint. Incoming-only range
-references remain collapsed, outside the main property count. When candidate/review
-status exists only as display metadata, Explorer keeps it in collapsed
-**Record details** instead of presenting it as a declared class property. Older
-graphs that explicitly define those predicates retain their property links.
+references remain collapsed, outside the main property count.
+
+Explorer's single **Properties** section contains both literal values and outgoing
+object-property targets. For FinanceHead, **审批（approves）** links to the same
+predicate definition shown in Hub; its 采购申请 and 供应商付款申请 values open the
+actual relationship details, conditions and source evidence. Parallel relationships
+remain individually accessible. Properties come from this instance's recorded
+values, not from filling in the class's possible properties.
+
+Candidate/review status recorded only as display metadata appears beside the
+node title. The declared class remains the primary type entry; its raw `rdf:type`
+assertions are available under **Node identifier**. There is no separate record
+details section. Older graphs with explicitly defined status predicates retain
+their property links. Missing definitions or relationship data are shown honestly;
+neither property matching nor source alignment promotes candidate knowledge to
+business-reviewed knowledge.
 
 Copy the **whole bundle directory** to another machine; paths inside it are
 relative. Only the code checkout, installed dependencies, built frontend and the

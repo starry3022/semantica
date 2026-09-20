@@ -38,6 +38,14 @@ export interface ConceptReferencesSnapshot {
   notice: string;
 }
 
+export interface InstanceObjectProperty {
+  property_uri: string;
+  label: string;
+  loaded: boolean;
+  ontology_uri: string | null;
+  targets: { node_id: string; label: string; edge_ids: string[] }[];
+}
+
 export interface InstanceTypesSnapshot {
   node_id: string;
   status: "declared" | "unmapped";
@@ -49,6 +57,7 @@ export interface InstanceTypesSnapshot {
     loaded: boolean;
     ontology_uri: string | null;
   }[];
+  object_properties?: InstanceObjectProperty[];
   related_concepts: {
     class_uri: string;
     label: string;
@@ -129,10 +138,35 @@ function isInstanceTypes(value: unknown): value is InstanceTypesSnapshot {
         && typeof property.key === "string" && typeof property.property_uri === "string"
         && typeof property.label === "string" && typeof property.loaded === "boolean"
         && isNullableString(property.ontology_uri))))
+    && (value.object_properties === undefined || isObjectProperties(value.object_properties))
     && (value.concept_references === undefined || (Array.isArray(value.concept_references)
       && value.concept_references.every((reference: unknown) => isConceptReference(reference) && reference.node_id === value.node_id)))
     && (value.concept_reference_issues === undefined || (Array.isArray(value.concept_reference_issues)
       && value.concept_reference_issues.every((issue: unknown) => isConceptReferenceIssue(issue) && issue.node_id === value.node_id)));
+}
+
+function isObjectProperties(value: unknown): value is InstanceObjectProperty[] {
+  if (!Array.isArray(value)) return false;
+  const properties = new Set<string>(), edges = new Set<string>();
+  return value.every((property: unknown) => {
+    if (!isRecord(property) || typeof property.property_uri !== "string" || !property.property_uri
+      || properties.has(property.property_uri) || typeof property.label !== "string"
+      || typeof property.loaded !== "boolean" || !isNullableString(property.ontology_uri)
+      || !Array.isArray(property.targets) || !property.targets.length) return false;
+    properties.add(property.property_uri);
+    const targets = new Set<string>();
+    return property.targets.every((target: unknown) => {
+      if (!isRecord(target) || typeof target.node_id !== "string" || !target.node_id
+        || targets.has(target.node_id) || typeof target.label !== "string"
+        || !Array.isArray(target.edge_ids) || !target.edge_ids.length) return false;
+      targets.add(target.node_id);
+      return target.edge_ids.every((edge: unknown) => {
+        if (typeof edge !== "string" || !edge || edges.has(edge)) return false;
+        edges.add(edge);
+        return true;
+      });
+    });
+  });
 }
 
 export async function loadInstanceTypes(nodeId: string, signal?: AbortSignal): Promise<InstanceTypesSnapshot> {

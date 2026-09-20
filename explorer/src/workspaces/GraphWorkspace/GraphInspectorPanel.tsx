@@ -7,7 +7,7 @@ import { focusedUnavailableReasonText } from "./graphViewCopy";
 import { MarkdownContentViewer } from "./MarkdownContentViewer";
 import { SourceEvidencePanel } from "./SourceEvidencePanel";
 import { InstanceTypesPanel } from "./InstanceTypesPanel";
-import type { InstanceTypesSnapshot } from "./instanceTypes";
+import type { InstanceObjectProperty, InstanceTypesSnapshot } from "./instanceTypes";
 import type { MarkdownApplyResult } from "./markdownResourceClient";
 import { getNodeDisplayLabel } from "./nodeDisplayLabels";
 import { propertyDisplayLabel } from "../OntologyWorkspace/propertyDisplayLabel";
@@ -59,6 +59,7 @@ export interface GraphInspectorPanelProps {
   showInstanceTypes?: boolean;
   onShowInstanceTypes?: (enabled: boolean) => void;
   onOpenOntologyEntity?: (uri: string) => void;
+  onInspectRelationship?: (edgeId: string) => void;
 }
 
 const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
@@ -325,6 +326,7 @@ export function GraphInspectorPanel({
   showInstanceTypes = false,
   onShowInstanceTypes,
   onOpenOntologyEntity,
+  onInspectRelationship,
 }: GraphInspectorPanelProps) {
   if (!nodeId) {
     return (
@@ -381,9 +383,10 @@ export function GraphInspectorPanel({
   };
   const properties = attributes?.properties ?? {};
   const attribution = sourceAttribution(properties);
+  const currentTypes = !instanceTypesLoading && !instanceTypesError && instanceTypes?.node_id === effectiveNodeId
+    ? instanceTypes : null;
   const propertyDefinitions = new Map(
-    (!instanceTypesLoading && !instanceTypesError && instanceTypes?.node_id === effectiveNodeId
-      ? instanceTypes.property_definitions ?? [] : []).map((definition) => [definition.key, definition]),
+    (currentTypes?.property_definitions ?? []).map((definition) => [definition.key, definition]),
   );
   const accentColor = GRAPH_THEME.ui.text.muted;
   const typeLabel = getNodeDisplayLabel(graph, attributes?.nodeType || "Entity");
@@ -392,17 +395,31 @@ export function GraphInspectorPanel({
       propertyDefinitions.get(key)?.loaded
       || !["x","y","valid_from","valid_until","content","source","source_url","pmid","pmids","evidence","provenance","confidence"].includes(key),
   );
-  const recordFields: Record<string, string> = {
-    "rdf:type": "Declared type（rdf:type）",
-    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": "Declared type（rdf:type）",
-    "@type": "Declared type（@type）",
-    fact_status: "Knowledge status（fact_status）",
-    review_status: "Business review（review_status）",
+  const typeKeys = new Set(["rdf:type", "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "@type"]);
+  const statusFields: Record<string, string> = {
+    fact_status: "Knowledge status",
+    review_status: "Business review",
   };
-  const isRecordField = (key: string) => Object.hasOwn(recordFields, key)
-    && (key === "rdf:type" || key.endsWith("#type") || !propertyDefinitions.get(key)?.loaded);
-  const propertyEntries = visibleEntries.filter(([key]) => !isRecordField(key));
-  const recordEntries = visibleEntries.filter(([key]) => isRecordField(key));
+  const statusEntries = visibleEntries.filter(([key]) => Object.hasOwn(statusFields, key) && !propertyDefinitions.get(key)?.loaded);
+  const typeEntries = visibleEntries.filter(([key]) => typeKeys.has(key));
+  const propertyEntries = visibleEntries.filter(([key]) => !typeKeys.has(key) && !statusEntries.some(([status]) => status === key));
+  const propertyRows = new Map<string, {
+    key: string;
+    definition?: Pick<InstanceObjectProperty, "property_uri" | "label" | "loaded" | "ontology_uri">;
+    values: unknown[];
+    targets: InstanceObjectProperty["targets"];
+  }>();
+  for (const [key, value] of propertyEntries) {
+    const definition = propertyDefinitions.get(key);
+    const uri = definition?.property_uri ?? key;
+    const row = propertyRows.get(uri) ?? { key, definition, values: [], targets: [] };
+    row.values.push(value);
+    propertyRows.set(uri, row);
+  }
+  for (const definition of currentTypes?.object_properties ?? []) {
+    const row = propertyRows.get(definition.property_uri) ?? { key: definition.property_uri, values: [], targets: [] };
+    propertyRows.set(definition.property_uri, { ...row, definition, targets: definition.targets });
+  }
   const nodeContent = (typeof attributes?.content === "string" && attributes.content)
     ? attributes.content
     : (typeof properties.content === "string" && properties.content)
@@ -422,9 +439,15 @@ export function GraphInspectorPanel({
         <h3 style={{ margin: 0, color: GRAPH_THEME.ui.text.strong, fontSize: 20, fontWeight: 700, wordBreak: "break-word" }}>
           {getNodeLabel(effectiveNodeId)}
         </h3>
+        {statusEntries.length ? <div aria-label="Review status" style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", color: GRAPH_THEME.ui.text.muted, fontSize: 11, marginTop: 6 }}>
+          {statusEntries.map(([key, value]) => <span key={key}>{statusFields[key]}: {typeof value === "object" ? JSON.stringify(value) : String(value)}</span>)}
+        </div> : null}
         <details key={effectiveNodeId} style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 12, marginTop: 8 }}>
           <summary style={{ cursor: "pointer" }}>Node identifier</summary>
           <code style={{ display: "block", marginTop: 6, overflowWrap: "anywhere" }}>{groupedDisplaySelection ? nodeId : effectiveNodeId}</code>
+          {typeEntries.map(([key, value]) => <div key={key} style={{ marginTop: 6, overflowWrap: "anywhere" }}>
+            Declared type ({key}): {typeof value === "object" ? JSON.stringify(value) : String(value)}
+          </div>)}
         </details>
         {groupedDisplaySelection ? (
           <div style={groupedSelectionNoticeStyle}>
@@ -462,6 +485,41 @@ export function GraphInspectorPanel({
         onShowTypes={onShowInstanceTypes}
         onOpenOntologyEntity={onOpenOntologyEntity}
       /> : null}
+
+      <details className="node-panel-collapse">
+        <summary className="node-panel-summary">Properties</summary>
+        <div className="node-panel-body" style={{ display: "grid", gap: 8 }}>
+          {[...propertyRows.entries()].map(([uri, { key, definition, values, targets }]) => {
+            const label = definition ? propertyDisplayLabel(definition.property_uri, definition.label) : key;
+            return <div key={uri} data-property-uri={uri} style={propertyCardStyle}>
+              <div style={{ color: GRAPH_THEME.ui.timeline.playhead, fontSize: 11, marginBottom: 4 }}>
+                {definition?.loaded && onOpenOntologyEntity
+                  ? <button type="button" aria-label={`View property ${label}`} title={definition.property_uri}
+                    onClick={() => onOpenOntologyEntity(definition.property_uri)}
+                    style={{ color: "inherit", font: "inherit", padding: 0, border: 0, background: "transparent", cursor: "pointer", textAlign: "left", overflowWrap: "anywhere" }}>{label}</button>
+                  : <span title={definition?.property_uri}>{label}</span>}
+              </div>
+              <div style={{ color: GRAPH_THEME.ui.text.body, fontSize: 13, overflowWrap: "anywhere", display: "grid", gap: 6 }}>
+                {values.map((value, index) => <div key={index}>{typeof value === "object" ? JSON.stringify(value) : String(value)}</div>)}
+                {targets.flatMap((target) => target.edge_ids.map((edgeId, index) => {
+                  const name = target.edge_ids.length > 1 ? `${target.label} (${index + 1}/${target.edge_ids.length})` : target.label;
+                  const canInspect = onInspectRelationship && graph.hasEdge(edgeId)
+                    && graph.source(edgeId) === effectiveNodeId && graph.target(edgeId) === target.node_id;
+                  return canInspect
+                    ? <button key={edgeId} type="button" aria-label={`View relationship ${label} → ${name}`} title="View relationship conditions and evidence"
+                      onClick={() => onInspectRelationship(edgeId)}
+                      style={{ color: "inherit", font: "inherit", border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", overflowWrap: "anywhere" }}>→ {name}</button>
+                    : <span key={edgeId} title={target.node_id}>→ {name}</span>;
+                }))}
+              </div>
+            </div>;
+          })}
+          {!propertyRows.size ? <div style={emptyTextStyle}>No additional properties are attached to this node.</div> : null}
+          {instanceTypes !== undefined && currentTypes?.object_properties === undefined ? <div style={emptyTextStyle}>
+            {instanceTypesLoading ? "Loading relationships…" : "Relationship details unavailable."}
+          </div> : null}
+        </div>
+      </details>
 
       <SourceEvidencePanel kind="node" id={effectiveNodeId} />
 
@@ -604,47 +662,6 @@ export function GraphInspectorPanel({
         </div>
       </details>
 
-      {/* Properties */}
-      <details className="node-panel-collapse">
-        <summary className="node-panel-summary">Properties</summary>
-        <div className="node-panel-body">
-          {propertyEntries.length ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {propertyEntries.map(([key, value]) => {
-                const definition = propertyDefinitions.get(key);
-                const label = definition?.loaded ? propertyDisplayLabel(definition.property_uri, definition.label) : key;
-                return (
-                <div key={key} style={propertyCardStyle}>
-                  <div style={{ color: GRAPH_THEME.ui.timeline.playhead, fontSize: 11, marginBottom: 4 }}>
-                    {definition?.loaded && onOpenOntologyEntity
-                      ? <button type="button" aria-label={`View property ${label}`} title={definition.property_uri}
-                        onClick={() => onOpenOntologyEntity(definition.property_uri)}
-                        style={{ color: "inherit", font: "inherit", padding: 0, border: 0, background: "transparent", cursor: "pointer", textAlign: "left", overflowWrap: "anywhere" }}>{label}</button>
-                      : <span title={definition?.property_uri}>{label}</span>}
-                  </div>
-                  <div style={{ color: GRAPH_THEME.ui.text.body, fontSize: 13, wordBreak: "break-word" }}>
-                    {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={emptyTextStyle}>No additional properties are attached to this node.</div>
-          )}
-        </div>
-      </details>
-      {recordEntries.length ? <details key={`${effectiveNodeId}:record-details`} className="node-panel-collapse">
-        <summary className="node-panel-summary">Record details</summary>
-        <div className="node-panel-body" style={{ display: "grid", gap: 8 }}>
-          {recordEntries.map(([key, value]) => <div key={key} style={propertyCardStyle}>
-            <div style={{ color: GRAPH_THEME.ui.text.muted, fontSize: 11, marginBottom: 4 }}>{recordFields[key]}</div>
-            <div style={{ color: GRAPH_THEME.ui.text.body, fontSize: 13, overflowWrap: "anywhere" }}>
-              {typeof value === "object" ? JSON.stringify(value) : String(value)}
-            </div>
-          </div>)}
-        </div>
-      </details> : null}
     </aside>
   );
 }
