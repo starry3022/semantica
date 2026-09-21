@@ -85,6 +85,7 @@ def generation(cli, extraction, monkeypatch):
     def extract(value, *, source_id, **config):
         assert value == text and source_id == "policy"
         assert config["api_key"] == "private-never-export"
+        assert config["review_coverage"] is True
         calls.append("extraction")
         return deepcopy(extracted)
 
@@ -345,3 +346,114 @@ def test_replay_rejects_inconsistent_summary_identity(
         cli.run(args)
     assert generation == ["extraction", "ontology"]
     assert not args.output.exists()
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_existing_bundle_review_exports_audit_and_replays_offline(
+    cli, extraction, generation, monkeypatch, tmp_path, staged
+):
+    args = args_for(tmp_path, extraction[0])
+    cli.run(args)
+    reviewed = deepcopy(extraction[1])
+    reviewed["extraction"]["coverage_review"] = {
+        "prompt_version": "candidate-semantic-coverage-v1", "provider": "openai", "model": "test",
+        "input_sha256": "recorded-input", "prompt_sha256": "recorded-prompt",
+        "response": {"entity_reviews": [{"status": "linked"}] * 2,
+                     "clause_reviews": [{"status": "covered"}], "relationships": [], "relationship_reviews": []},
+    }
+    reviewed["prompts"]["coverage_review"] = "recorded review prompt"
+    if staged:
+        record = reviewed["extraction"]["coverage_review"]
+        record["prompt_version"] = "candidate-semantic-coverage-staged-v1"
+        audit = record.pop("response")
+        record["stages"] = [
+            {"name": name, "prompt_sha256": "recorded", "generation_options": {}, "response": deepcopy(audit)}
+            for name in ("diagnosis", "revision_1", "acceptance_1")
+        ]
+        for stage in record["stages"]:
+            reviewed["prompts"]["coverage_" + stage["name"]] = "recorded " + stage["name"]
+
+    def review(text, initial, **config):
+        assert text == extraction[0] and initial == extraction[1]
+        assert config["api_key"] == "private-never-export"
+        generation.append("coverage_review")
+        return deepcopy(reviewed)
+
+    monkeypatch.setattr(cli, "review_candidate_facts", review)
+    review_args = Namespace(
+        replay=None, review_bundle=args.output, config=args.config, output=tmp_path / "reviewed",
+    )
+    summary = cli.run(review_args)
+    assert generation == ["extraction", "ontology", "replay", "coverage_review", "ontology"]
+    assert summary["semantic_coverage_review"]["entity_reviews"] == 2
+    assert summary["review_status"] == "unreviewed"
+    assert summary["mode"] == "llm_coverage_review"
+    assert summary["semantic_coverage_review"]["stages"] == (3 if staged else 0)
+    if staged:
+        for stage in reviewed["extraction"]["coverage_review"]["stages"]:
+            assert (review_args.output / f"coverage-{stage['name']}.json").exists()
+            assert (review_args.output / f"coverage-{stage['name']}-prompt.txt").exists()
+    assert (review_args.output / "source.txt").read_bytes() == (args.output / "source.txt").read_bytes()
+    for name in ("coverage-review.json", "coverage-review-prompt.txt"):
+        assert name in summary["files"]
+        assert b"private-never-export" not in (review_args.output / name).read_bytes()
+
+    def replay(text, record, *, source_id):
+        assert text == extraction[0] and source_id == "policy"
+        assert record == reviewed["extraction"]
+        return deepcopy(reviewed)
+
+    monkeypatch.setattr(cli, "replay_candidate_facts", replay)
+    replay_args = Namespace(replay=review_args.output, output=tmp_path / "replayed")
+    cli.run(replay_args)
+    for name in ("facts.json", "coverage-review.json", "coverage-review-prompt.txt"):
+        assert (replay_args.output / name).read_bytes() == (review_args.output / name).read_bytes()
+    assert generation.count("ontology") == 2
+
+    # Even a rewritten bundle hash cannot make a different audit prompt replay.
+    path = review_args.output / "coverage-review-prompt.txt"
+    path.write_text("changed audit prompt", encoding="utf-8")
+    summary["files"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (review_args.output / "SUMMARY.json").write_text(json.dumps(summary), encoding="utf-8")
+    replay_args.output = tmp_path / "tampered"
+    with pytest.raises(ValueError, match="prompt artifacts"):
+        cli.run(replay_args)
+    assert not replay_args.output.exists()
+
+
+@pytest.mark.parametrize("field", ["source_id", "title", "sha256"])
+def test_review_bundle_checks_source_identity_before_model(
+    cli, extraction, generation, tmp_path, field
+):
+    args = args_for(tmp_path, extraction[0])
+    cli.run(args)
+    path = args.output / "SUMMARY.json"
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    summary["source"][field] = "different"
+    path.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(ValueError, match="source identity"):
+        cli.run(Namespace(replay=None, review_bundle=args.output, config=args.config, output=tmp_path / "reviewed"))
+    assert generation == ["extraction", "ontology"]
+
+
+def test_rejected_review_saves_diagnostic_and_never_publishes_or_overwrites(
+    cli, extraction, generation, monkeypatch, tmp_path
+):
+    args = args_for(tmp_path, extraction[0])
+    cli.run(args)
+    record = {"response": {"relationships": []}, "model": "test"}
+
+    def reject(*a, **kw):
+        raise cli.CoverageReviewError("missing line coverage", record)
+
+    monkeypatch.setattr(cli, "review_candidate_facts", reject)
+    target = tmp_path / "rejected"
+    argv = ["--config", str(args.config), "--review-bundle", str(args.output), "--output", str(target)]
+    assert cli.main(argv) == 2
+    assert not target.exists()
+    diagnostic = tmp_path / "rejected.coverage-rejected.json"
+    assert json.loads(diagnostic.read_text(encoding="utf-8"))["review"] == record
+    diagnostic.write_text("previous rejected response", encoding="utf-8")
+    assert cli.main(argv) == 2
+    assert diagnostic.read_text(encoding="utf-8") == "previous rejected response"
+    assert generation.count("ontology") == 1

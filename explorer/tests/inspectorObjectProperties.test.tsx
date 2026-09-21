@@ -40,15 +40,24 @@ test.beforeEach(() => {
 });
 test.afterEach(() => { cleanup(); graph.clear(); });
 
-test("instance Properties includes outgoing object values and exact definition/relationship navigation", () => {
+test("instance Properties includes business relationships without duplicating provenance from the source viewer", () => {
   const opened: string[] = [], inspected: string[] = [];
+  const provenance = {
+    property_uri: "https://provenance.test/cites", label: "出处", loaded: true, ontology_uri: "https://provenance.test/",
+    schema_role: "provenance" as const, targets: [{ node_id: "citation", label: "审批证据原文", edge_ids: ["citation-edge"] }],
+  };
+  graph.addNode("citation", { label: "审批证据原文", properties: {} });
+  graph.addDirectedEdgeWithKey("citation-edge", "finance", "citation", { edgeType: provenance.property_uri, properties: {} });
+  const current = { ...snapshot, object_properties: [...snapshot.object_properties, provenance] };
   const before = JSON.stringify(graph.export());
-  const view = render(<GraphInspectorPanel {...props} instanceTypes={snapshot}
+  const view = render(<GraphInspectorPanel {...props} instanceTypes={current}
     onOpenOntologyEntity={(uri) => opened.push(uri)} onInspectRelationship={(id: string) => inspected.push(id)} />);
   const panel = view.getByText("Properties", { selector: "summary" }).parentElement!;
   fireEvent.click(view.getByText("Properties", { selector: "summary" }));
   assert.ok(view.queryByText("Record details") === null);
   assert.ok(panel.textContent?.includes("文本（text）"));
+  assert.equal(panel.querySelector('[data-property-uri="https://provenance.test/cites"]'), null);
+  assert.ok(!panel.textContent?.includes("审批证据原文"));
   fireEvent.click(view.getByRole("button", { name: "View property 审批（approves）", exact: true }));
   assert.deepEqual(opened, [approves]);
   for (const target of objectProperty.targets) {

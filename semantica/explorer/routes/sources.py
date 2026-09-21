@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..dependencies import get_session
+from ..candidate_provenance import is_evidence_link, is_source_link
 from ..session import GraphSession
 from ..source_resources import SourceResourceRegistry
 
@@ -92,7 +93,7 @@ def _validate_evidence(
         ] = "Evidence requires a source identity, valid SHA-256, and a text quote."
         return
     for edge in edges:
-        if edge["type"] != "fromSource" or edge["source"] != entry["id"]:
+        if not is_source_link(edge["type"], session.graph) or edge["source"] != entry["id"]:
             continue
         linked = _read_node(session, edge["target"])
         linked_properties = _properties(linked)
@@ -209,6 +210,8 @@ def _source_view(
         rule = {}
         references = []
         sources = {}
+        assertions = []
+        related_relationships = []
         if node_id is not None:
             node = _read_node(session, node_id)
             if node is None:
@@ -228,8 +231,25 @@ def _source_view(
                 references.extend(
                     edge["target"]
                     for edge in edges
-                    if edge["source"] == node_id and edge["type"] == "hasEvidence"
+                    if edge["source"] == node_id and is_evidence_link(edge["type"], session.graph)
                 )
+            for edge in edges:
+                records = edge.get("metadata", {}).get("candidate_assertions")
+                if (
+                    node_id not in (edge["source"], edge["target"])
+                    or not isinstance(records, list)
+                    or not records
+                ):
+                    continue
+                source_node = _read_node(session, edge["source"])
+                target_node = _read_node(session, edge["target"])
+                related_relationships.append({
+                    "edge_id": edge["id"],
+                    "predicate": edge["type"],
+                    "source_label": (source_node or {}).get("content") or edge["source"],
+                    "target_label": (target_node or {}).get("content") or edge["target"],
+                    "assertion_count": len(records),
+                })
         else:
             edge = next((edge for edge in edges if edge["id"] == edge_id), None)
             if edge is None:
@@ -237,10 +257,10 @@ def _source_view(
                     status_code=404, detail="Graph relationship not found."
                 )
             selection = {"kind": "edge", "id": edge_id, "label": edge["type"]}
-            if edge["type"] == "hasEvidence":
+            if is_evidence_link(edge["type"], session.graph):
                 references.append(edge["target"])
                 rule = _properties(_read_node(session, edge["source"]))
-            elif edge["type"] == "fromSource":
+            elif is_source_link(edge["type"], session.graph):
                 references.append(edge["source"])
             properties = edge.get("metadata", {})
             if "evidence_id" in properties:
@@ -248,6 +268,23 @@ def _source_view(
             if "evidence_ids" in properties:
                 ids = properties["evidence_ids"]
                 references.extend(ids if isinstance(ids, list) else [ids])
+            records = properties.get("candidate_assertions")
+            for record in records if isinstance(records, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                ids = record.get("evidence_ids", [])
+                ids = [value for value in ids if isinstance(value, str)] if isinstance(ids, list) else []
+                references.extend(ids)
+                assertions.append({
+                    "assertion_id": _string(record.get("assertion_id")),
+                    "qualifiers": {
+                        key: value for key, value in record.items()
+                        if key not in {"assertion_id", "evidence_ids"}
+                    },
+                    "evidence_ids": ids,
+                    "fact_status": _string(properties.get("fact_status")),
+                    "review_status": _string(properties.get("review_status")),
+                })
         evidence = []
         seen = set()
         reference_ids = {value for value in references if isinstance(value, str)}
@@ -273,13 +310,18 @@ def _source_view(
             key=lambda item: {"primary": 0, "supporting": 1, "unknown": 2}[item["role"]]
         )
         related_rules = _related_process_rules(session, edges, node_id, edge_id)
-        return {
+        result = {
             "selection": selection,
             "evidence": evidence,
             "sources": list(sources.values()),
             "related_rules": related_rules,
             "status": "ok" if evidence or sources or related_rules else "no_evidence",
         }
+        if assertions:
+            result["assertions"] = assertions
+        if related_relationships:
+            result["related_relationships"] = related_relationships
+        return result
 
 
 @router.get("/view")

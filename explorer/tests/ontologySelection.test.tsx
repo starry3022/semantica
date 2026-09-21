@@ -17,6 +17,7 @@ const { act, cleanup, fireEvent, render, waitFor } = await import("@testing-libr
 const { OntologyEditor } = await import("../src/workspaces/OntologyWorkspace/OntologyEditor.tsx");
 const { OntologyWorkspace } = await import("../src/workspaces/OntologyWorkspace/index.tsx");
 const { ReactFlowProvider, useStoreApi } = await import("@xyflow/react");
+const { declaredRelationshipEdges, relationshipEdgeLabel } = await import("../src/workspaces/OntologyWorkspace/relationshipShapes.ts");
 
 const ontology = "https://example.test/policy/";
 const requestClass = `${ontology}Request`;
@@ -45,6 +46,70 @@ test.afterEach(cleanup);
 function selectedIds(container: HTMLElement) {
   return [...container.querySelectorAll(".react-flow__node.selected")].map((node) => node.getAttribute("data-id"));
 }
+
+test("a class with saved relationship declarations opens a readable neighborhood and can restore the full ontology", async () => {
+  const relation = `${ontology}hasEvidence`;
+  const unrelated = `${ontology}Unrelated`;
+  const graphNodes = [...nodes.filter((node) => node.id !== amountProperty),
+    { id: relation, type: "owl:ObjectProperty", content: "有证据" },
+    { id: unrelated, type: "owl:Class", content: "其他类型" }];
+  const graphEdges = [{ id: `${ontology}shape`, source: requestClass, target: approvalClass, type: relation,
+    properties: { schema_kind: "relationship_shape", shape_uri: `${ontology}shape`, property_uri: relation, ontology_uri: ontology, label: "模型声明的关系", comment: "候选关系定义", definition_source: "llm" } }];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => new URL(String(input), "http://localhost").pathname === "/api/ontology/graph"
+    ? new Response(JSON.stringify({ uri: ontology, nodes: graphNodes, edges: graphEdges })) : original(input, init);
+  const view = render(<OntologyEditor />);
+  await view.findByRole("heading", { name: "Class Details" });
+  await waitFor(() => assert.equal(view.container.querySelectorAll(".react-flow__node").length, 2));
+  assert.equal(view.container.querySelector(`[data-id='${unrelated}']`), null);
+  const toggle = view.getByRole<HTMLInputElement>("checkbox", { name: "Show entire ontology" });
+  assert.equal(toggle.checked, false);
+  fireEvent.click(toggle);
+  await waitFor(() => assert.ok(view.container.querySelector(`[data-id='${unrelated}']`)));
+  assert.deepEqual(selectedIds(view.container), [requestClass]);
+});
+
+test("named OWL business endpoints remain visible alongside LLM provenance declarations", async () => {
+  const businessProperty = `${ontology}requestsAuthorization`;
+  const evidenceProperty = `${ontology}hasEvidence`;
+  const evidenceClass = `${ontology}Evidence`;
+  const graphNodes = [...nodes,
+    { id: businessProperty, type: "owl:ObjectProperty", content: "请求授权" },
+    { id: evidenceProperty, type: "owl:ObjectProperty", content: "有证据", properties: { schema_role: "provenance" } },
+    { id: evidenceClass, type: "owl:Class", content: "证据" }];
+  const graphEdges = [
+    { source: businessProperty, target: approvalClass, type: "rdfs:domain" },
+    { source: businessProperty, target: requestClass, type: "rdfs:range" },
+    { id: "saved-shape", source: requestClass, target: evidenceClass, type: evidenceProperty,
+      properties: { schema_kind: "relationship_shape", shape_uri: `${ontology}shape`, property_uri: evidenceProperty, ontology_uri: ontology, label: "采购申请有证据", comment: "候选关系定义", definition_source: "llm", schema_role: "provenance" } },
+  ];
+  const projected = declaredRelationshipEdges(graphNodes, graphEdges);
+  assert.equal(projected.length, 4);
+  assert.deepEqual([projected[3].source, projected[3].target, projected[3].type], [approvalClass, requestClass, businessProperty]);
+  assert.equal(relationshipEdgeLabel(graphEdges[2], graphNodes), "有证据（hasEvidence）");
+  assert.equal(relationshipEdgeLabel(projected[3], graphNodes), "请求授权（requestsAuthorization）");
+  assert.equal(declaredRelationshipEdges(graphNodes, projected).length, 4, "saved and OWL declarations must not duplicate the same displayed link");
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => new URL(String(input), "http://localhost").pathname === "/api/ontology/graph"
+    ? new Response(JSON.stringify({ uri: ontology, nodes: graphNodes, edges: graphEdges })) : original(input, init);
+  const view = render(<OntologyEditor />);
+  await view.findByRole("heading", { name: "Class Details" });
+  await waitFor(() => assert.equal(view.container.querySelectorAll(".react-flow__node").length, 3));
+  assert.ok(view.container.querySelector(`[data-id='${approvalClass}']`));
+  assert.ok(view.container.querySelector(`[data-id='${evidenceClass}']`));
+});
+
+test("usage and conjunctive or anonymous OWL endpoints never become simple relationship declarations", () => {
+  const property = { id: `${ontology}reviews`, type: "owl:ObjectProperty", content: "审核" };
+  const graphNodes = [...nodes, property];
+  const instance = { source: requestClass, target: approvalClass, type: property.id };
+  assert.deepEqual(declaredRelationshipEdges(graphNodes, [instance]), [instance]);
+  const declared = [{ source: property.id, target: requestClass, type: "rdfs:domain" }, { source: property.id, target: approvalClass, type: "rdfs:range" }];
+  const conjunctive = [...declared, { source: property.id, target: approvalClass, type: "rdfs:domain" }];
+  assert.deepEqual(declaredRelationshipEdges(graphNodes, conjunctive), conjunctive);
+  const complex = [...nodes, { ...property, properties: { domain_expressions: [{ kind: "unionOf", members: [requestClass, approvalClass] }] } }];
+  assert.deepEqual(declaredRelationshipEdges(complex, declared), declared);
+});
 
 test("opening a class deep link selects and visibly marks the same node as the detail panel", async () => {
   const view = render(<OntologyEditor />);

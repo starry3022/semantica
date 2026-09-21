@@ -38,6 +38,23 @@ class TestSemanticClasses:
 class TestProviderLimits:
     """Test that providers pass through correct length parameters."""
 
+    def test_openai_reasoning_effort_reaches_plain_and_structured_requests(self):
+        from semantica.semantic_extract.providers import OpenAIProvider
+
+        with patch.object(OpenAIProvider, '_init_client', return_value=None):
+            provider = OpenAIProvider(api_key="fake", base_url="https://gateway.example/v1")
+        provider.client = MagicMock()
+        provider.client.chat.completions.create.return_value.choices[0].message.content = '{"ok": true}'
+        for method in (provider.generate, provider.generate_structured):
+            method("prompt", reasoning_effort="low", max_tokens=32000, thinking={"type": "disabled"})
+            kwargs = provider.client.chat.completions.create.call_args.kwargs
+            assert kwargs["reasoning_effort"] == "low"
+            assert kwargs["max_tokens"] == 32000
+            assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+            method("prompt")
+            assert "reasoning_effort" not in provider.client.chat.completions.create.call_args.kwargs
+            assert "extra_body" not in provider.client.chat.completions.create.call_args.kwargs
+
     def test_openai_max_completion_tokens(self):
         from semantica.semantic_extract.providers import OpenAIProvider
         

@@ -435,6 +435,7 @@ class BaseProvider:
                         kwargs,
                         "max_tokens",
                         "max_completion_tokens",
+                        "reasoning_effort",
                         "top_p",
                         "frequency_penalty",
                         "presence_penalty",
@@ -447,6 +448,9 @@ class BaseProvider:
 
                     if provider_name == "GroqProvider":
                         create_kwargs["response_format"] = {"type": "json_object"}
+
+                    if kwargs.get("thinking") is not None:
+                        create_kwargs["extra_body"] = {"thinking": kwargs["thinking"]}
 
                     try:
                         response = client.chat.completions.create(**create_kwargs)
@@ -735,8 +739,11 @@ class OpenAIProvider(BaseProvider):
             "stop",
             "logit_bias",
             "user",
+            "reasoning_effort",
         )
 
+        if kwargs.get("thinking") is not None:
+            create_kwargs["extra_body"] = {"thinking": kwargs["thinking"]}
         response = self.client.chat.completions.create(**create_kwargs)
         return response.choices[0].message.content
 
@@ -768,8 +775,11 @@ class OpenAIProvider(BaseProvider):
             "stop",
             "logit_bias",
             "user",
+            "reasoning_effort",
         )
 
+        if kwargs.get("thinking") is not None:
+            create_kwargs["extra_body"] = {"thinking": kwargs["thinking"]}
         response = self.client.chat.completions.create(**create_kwargs)
         try:
             return self._parse_json(response.choices[0].message.content)

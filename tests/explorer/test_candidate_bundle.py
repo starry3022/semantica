@@ -630,6 +630,303 @@ def test_v2_assertions_keep_their_own_evidence_when_sharing_a_display_edge(tmp_p
         view = client.get("/api/sources/view", params={"edge_id": edge["id"]}).json()
     assert len(view["evidence"]) == 2
     assert {entry["status"] for entry in view["evidence"]} == {"aligned"}
+    assert [item["qualifiers"]["condition"] for item in view["assertions"]] == ["加急申请", "普通申请"]
+    assert [item["assertion_id"] for item in view["assertions"]] == statements.assertion_ids
+    assert [item["evidence_ids"] for item in view["assertions"]] == [item["evidence_ids"] for item in assertions]
+
+
+def _provenance_response():
+    """A provider fixture; production has no schema-generation fallback."""
+    from semantica.ontology.candidate_statements import CANDIDATE_NS as C
+
+    owner = "https://example.test/provenance"
+    return {
+        "bindings": {
+            "node_types": {"Evidence": C + "Evidence", "SourceDocument": owner + "#Document"},
+            "edge_types": {"hasEvidence": C + "hasEvidence", "fromSource": owner + "#document"},
+        },
+        "ontology": {
+            "uri": owner,
+            "name": "溯源草案",
+            "classes": [
+                {"uri": C + "Evidence", "name": "Evidence", "label": "原文证据", "comment": "引用片段", "subClassOf": None},
+                {"uri": owner + "#Document", "name": "Document", "label": "来源文档", "comment": "原始材料", "subClassOf": None},
+            ],
+            "properties": [
+                {"uri": C + "hasEvidence", "name": "hasEvidence", "label": "引用证据", "comment": "显式引用", "type": "object", "domain": [], "range": [C + "Evidence"]},
+                {"uri": owner + "#document", "name": "document", "label": "引用来源", "comment": "材料版本", "type": "object", "domain": [C + "Evidence"], "range": [owner + "#Document"]},
+            ],
+        },
+        "relationship_shapes": [
+            {"uri": owner + "#financeEvidence", "target_class": NS + "FinanceOfficer", "path": C + "hasEvidence", "value_classes": [C + "Evidence"], "schema_role": "provenance", "label": "引用证据", "comment": "该记录的原文引用"},
+            {"uri": owner + "#assertionEvidence", "target_class": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement", "path": C + "hasEvidence", "value_classes": [C + "Evidence"], "schema_role": "provenance", "label": "断言证据", "comment": "该断言的原文引用"},
+            {"uri": owner + "#evidenceDocument", "target_class": C + "Evidence", "path": owner + "#document", "value_classes": [owner + "#Document"], "schema_role": "provenance", "label": "来源材料", "comment": "引用的原始材料"},
+            {"uri": owner + "#financeReviews", "target_class": NS + "FinanceOfficer", "path": NS + "reviews", "value_classes": [NS + "Payment"], "schema_role": "business", "label": "审核付款", "comment": "按原断言的条件审核付款"},
+        ],
+    }
+
+
+def test_llm_provenance_definitions_are_loaded_without_changing_facts_or_required_constraints(tmp_path):
+    from semantica.explorer.candidate_bundle import create_bundle_app
+    from semantica.ontology.candidate_provenance import normalize_provenance_model
+    from semantica.ontology.candidate_statements import REPRESENTATION, CANDIDATE_NS
+
+    inputs = _qualified_inputs()
+    path = tmp_path / "bundle"
+    projection = _write_bundle(path, inputs=inputs)
+    model = normalize_provenance_model(_provenance_response(), projection, inputs[0], provider="test", model="recorded-model")
+    (path / "provenance-model.json").write_text(json.dumps(model), encoding="utf-8")
+    _rehash(path)
+    _set_bundle_declarations(path, version="candidate-facts-bundle-v2", qualified=True, representation=REPRESENTATION)
+    before = {file.name: file.read_bytes() for file in path.iterdir()}
+    with TestClient(create_bundle_app(path)) as client:
+        instance = client.get("/api/ontology/instance-types", params={"node_id": ALICE}).json()
+        evidence_property = next(prop for prop in instance["object_properties"] if prop["property_uri"] == CANDIDATE_NS + "hasEvidence")
+        assert evidence_property["loaded"] is True
+        assert evidence_property["schema_role"] == "provenance"
+        assert evidence_property["ontology_uri"] == model["ontology"]["uri"]
+        usage = client.get("/api/ontology/class-instances", params={"class_uri": NS + "FinanceOfficer"}).json()
+        assert any(prop["schema_role"] == "provenance" for prop in usage["observed_properties"] if "schema_role" in prop)
+        view = client.get("/api/sources/view", params={"node_id": ALICE}).json()
+        assert [item["status"] for item in view["evidence"]] == ["aligned"]
+        assert view["related_relationships"][0]["assertion_count"] == 2
+        linked = client.get("/api/sources/view", params={"edge_id": evidence_property["targets"][0]["edge_ids"][0]}).json()
+        assert linked["evidence"] == view["evidence"]
+        schema = client.get("/api/ontology/graph", params={"uri": model["ontology"]["uri"]}).json()
+        assert not any(edge["type"] == "rdfs:domain" and edge["target"] == NS + "FinanceOfficer" for edge in schema["edges"])
+        declared = [edge for edge in schema["edges"] if edge.get("properties", {}).get("schema_kind") == "relationship_shape"]
+        assert {edge["id"] for edge in declared} == {shape["uri"] for shape in model["relationship_shapes"] if shape["schema_role"] == "provenance"}
+        assert any(edge["source"] == "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement" for edge in declared)
+        business = client.get("/api/ontology/graph", params={"uri": NS}).json()
+        scoped = [edge for edge in business["edges"] if edge.get("properties", {}).get("schema_kind") == "relationship_shape"]
+        assert len(scoped) == 2
+        assert {(edge["source"], edge["type"], edge["target"]) for edge in scoped} == {
+            (NS + "FinanceOfficer", CANDIDATE_NS + "hasEvidence", CANDIDATE_NS + "Evidence"),
+            (NS + "FinanceOfficer", NS + "reviews", NS + "Payment"),
+        }
+        assert {edge["properties"]["schema_role"] for edge in scoped} == {"business", "provenance"}
+        assert all(edge["properties"]["definition_source"] == "llm" for edge in scoped)
+        assert any(node["id"] == CANDIDATE_NS + "hasEvidence" for node in business["nodes"])
+        # Rendering a shape must never materialize a class-to-class fact.
+        assert not any(edge.source_id == NS + "FinanceOfficer" and edge.edge_type == CANDIDATE_NS + "hasEvidence" for edge in client.app.state.session.graph.edges)
+    assert before == {file.name: file.read_bytes() for file in path.iterdir()}
+
+
+@pytest.mark.parametrize("mutation", ["new_rule", "required", "business_domain", "reminted", "missing", "stale"])
+def test_provenance_rejects_invented_semantics_and_changed_bindings(mutation):
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import normalize_provenance_model, validate_provenance_model
+    from semantica.utils.exceptions import ValidationError
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    result = _provenance_response()
+    if mutation == "new_rule":
+        result["ontology"]["classes"].append({"uri": NS + "ApprovalRule", "name": "ApprovalRule", "label": "规则", "comment": "规则"})
+    elif mutation == "required":
+        result["ontology"]["properties"][0]["minCount"] = 1
+    elif mutation == "business_domain":
+        result["ontology"]["properties"][0]["domain"] = [NS + "FinanceOfficer"]
+    elif mutation == "reminted":
+        result["bindings"]["edge_types"]["hasEvidence"] = NS + "hasEvidence"
+    elif mutation == "missing":
+        del result["bindings"]["node_types"]["Evidence"]
+    else:
+        result = normalize_provenance_model(result, projection, inputs[0], provider="test", model="recorded-model")
+        projection["nodes"][0]["content"] = "Changed input"
+    with pytest.raises(ValidationError):
+        if mutation == "stale":
+            validate_provenance_model(result, projection, inputs[0])
+        else:
+            normalize_provenance_model(result, projection, inputs[0], provider="test", model="recorded-model")
+
+
+@pytest.mark.parametrize("mutation", ["missing_assertion", "missing_business", "wrong_role", "wrong_subject", "wrong_target", "wrong_property", "required", "duplicate", "occupied_iri", "unknown_field"])
+def test_relationship_shapes_reject_unsupported_output_without_completion(mutation):
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import normalize_provenance_model
+    from semantica.utils.exceptions import ValidationError
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    response = _provenance_response()
+    shapes = response["relationship_shapes"]
+    if mutation == "missing_assertion":
+        shapes.pop(1)
+    elif mutation == "missing_business":
+        shapes.pop()
+    elif mutation == "wrong_role":
+        shapes[-1]["schema_role"] = "provenance"
+    elif mutation == "wrong_subject":
+        shapes[0]["target_class"] = NS + "Payment"
+    elif mutation == "wrong_target":
+        shapes[0]["value_classes"] = [NS + "Payment"]
+    elif mutation == "wrong_property":
+        shapes[0]["path"] = NS + "reviews"
+    elif mutation == "required":
+        shapes[0]["minCount"] = 1
+    elif mutation == "duplicate":
+        shapes.append({**shapes[0], "uri": "https://example.test/duplicate"})
+    elif mutation == "occupied_iri":
+        shapes[0]["uri"] = ALICE
+    else:
+        shapes[0]["approval_rule"] = "always approve"
+    before = copy.deepcopy(response)
+    with pytest.raises(ValidationError):
+        normalize_provenance_model(response, projection, inputs[0], provider="test", model="recorded-model")
+    assert response == before
+
+
+def test_relationship_shapes_serialize_as_optional_standard_shacl_and_replay_exactly():
+    from rdflib import Graph, RDF, URIRef
+    from rdflib.namespace import SH
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import normalize_provenance_model, serialize_relationship_shapes, validate_provenance_model
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    response = _provenance_response()
+    normalized = normalize_provenance_model(response, projection, inputs[0], provider="test", model="recorded-model")
+    assert normalized["relationship_shapes"] == response["relationship_shapes"]
+    validate_provenance_model(normalized, projection, inputs[0])
+    graph = Graph().parse(data=serialize_relationship_shapes(normalized["relationship_shapes"]), format="turtle")
+    for shape in response["relationship_shapes"]:
+        ref = URIRef(shape["uri"])
+        assert (ref, RDF.type, SH.PropertyShape) in graph
+        assert (ref, SH.targetClass, URIRef(shape["target_class"])) in graph
+        assert (ref, SH.path, URIRef(shape["path"])) in graph
+        assert (ref, SH["class"], URIRef(shape["value_classes"][0])) in graph
+    assert not list(graph.triples((None, SH.minCount, None)))
+    assert not list(graph.triples((None, SH.maxCount, None)))
+
+
+def test_legacy_provenance_replays_without_synthesizing_relationship_shapes():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.explorer.candidate_provenance import with_provenance_schema
+    from semantica.ontology.candidate_provenance import normalize_provenance_model, validate_provenance_model
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    response = _provenance_response()
+    response.pop("relationship_shapes")
+    normalized = normalize_provenance_model(response, projection, inputs[0], provider="test", model="recorded-model", legacy=True)
+    validate_provenance_model(normalized, projection, inputs[0])
+    assert "relationship_shapes" not in with_provenance_schema(projection, normalized)["metadata"]
+
+
+def test_v3_replay_preserves_provenance_only_without_fabricating_business_shapes():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import PROVENANCE_ONLY_VERSION, normalize_provenance_model, validate_provenance_model
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    response = _provenance_response()
+    response["relationship_shapes"] = response["relationship_shapes"][:-1]
+    for shape in response["relationship_shapes"]:
+        shape["value_class"] = shape.pop("value_classes")[0]
+        shape.pop("schema_role")
+    normalized = normalize_provenance_model(response, projection, inputs[0], provider="test", model="recorded-model", version=PROVENANCE_ONLY_VERSION)
+    validate_provenance_model(normalized, projection, inputs[0])
+    assert normalized["relationship_shapes"] == response["relationship_shapes"]
+
+
+def test_v4_provenance_keeps_its_original_prompt_and_business_contract():
+    import hashlib
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import (
+        BUSINESS_PROMPT_VERSION, _v4_provenance_prompt,
+        normalize_provenance_model, validate_provenance_model,
+    )
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    response = _provenance_response()
+    result = normalize_provenance_model(
+        response, projection, inputs[0], provider="test", model="recorded-model",
+        version=BUSINESS_PROMPT_VERSION,
+    )
+    assert result["ontology"]["metadata"]["prompt_sha256"] == hashlib.sha256(
+        _v4_provenance_prompt(projection, inputs[0]).encode()
+    ).hexdigest()
+    assert result["relationship_shapes"] == response["relationship_shapes"]
+    validate_provenance_model(result, projection, inputs[0])
+
+
+def test_compact_provenance_context_preserves_observed_types_and_qualified_evidence():
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import _v4_provenance_prompt, build_provenance_prompt
+
+    inputs = _qualified_inputs()
+    projection = build_candidate_graph(*inputs)
+    before = copy.deepcopy(projection)
+    old_prompt = _v4_provenance_prompt(projection, inputs[0])
+    new_prompt = build_provenance_prompt(projection, inputs[0])
+    old = json.loads(old_prompt.split("INPUT:\n", 1)[1])
+    new = json.loads(new_prompt.split("INPUT:\n", 1)[1])
+
+    def combinations(rows):
+        return {(source, row["predicate"], target) for row in rows
+                for source in row["source_types"] for target in row["target_types"]}
+
+    assert combinations(new["typed_links"]) == combinations(old["typed_links"])
+    assert len({(row["source_types"][0], row["predicate"]) for row in new["typed_links"]}) == len(new["typed_links"])
+    assert new["required_existing_identities"] == old["required_existing_identities"]
+    assert new["reserved_resource_iris"] == old["reserved_resource_iris"]
+    for initial, compact in zip(old["relationship_assertions"], new["relationship_assertions"]):
+        assert compact["predicate"] == initial["type"]
+        assert compact["source"] == initial["source"]
+        assert compact["target"] == initial["target"]
+        for raw, retained in zip(initial["properties"]["candidate_assertions"], compact["assertions"]):
+            assert retained == {key: value for key, value in raw.items()
+                                if key in {"assertion_id", "condition", "modality", "negation", "evidence_ids"}}
+    assert [(row["id"], row.get("content")) for row in new["citation_records"]] == [
+        (row["id"], row.get("content")) for row in old["citation_records"]
+    ]
+    assert projection == before
+    assert len(new_prompt) < len(old_prompt)
+
+
+def test_multi_target_relationship_uses_shacl_alternatives_and_keeps_qualified_facts():
+    from rdflib import Graph, RDF, URIRef
+    from rdflib.namespace import SH
+    from pyshacl import validate
+    from semantica.explorer.candidate_bundle import build_candidate_graph
+    from semantica.ontology.candidate_provenance import normalize_provenance_model, serialize_relationship_shapes
+    from semantica.ontology.candidate_statements import prepare_candidate_statements
+    from semantica.utils.exceptions import ValidationError
+
+    _, ontology, facts, manifest = _qualified_inputs()
+    other = "https://example.test/facts/expense"
+    facts["entities"].append({"id": other, "type": NS + "Expense", "text": "报销"})
+    facts["relationships"].append({**copy.deepcopy(facts["relationships"][0]), "id": "urn:example:assertion:three", "target_id": other})
+    ontology["classes"].append({"uri": NS + "Expense", "name": "Expense", "label": "报销", "comment": "报销申请", "subClassOf": None})
+    next(prop for prop in ontology["properties"] if prop["uri"] == NS + "reviews")["range"] = []
+    statements = prepare_candidate_statements(facts)
+    ontology["metadata"].update(input_rdf_sha256=statements.prepared.sha256, input_facts_sha256=statements.facts_sha256, projection_rdf_sha256=statements.projection.sha256)
+    projection = build_candidate_graph(statements.rdf, ontology, facts, manifest)
+    response = _provenance_response()
+    response["relationship_shapes"][-1]["value_classes"].append(NS + "Expense")
+    before = copy.deepcopy((facts, projection))
+    normalized = normalize_provenance_model(response, projection, statements.rdf, provider="test", model="recorded-model")
+    assert before == (facts, projection)
+    shape = normalized["relationship_shapes"][-1]
+    shapes = Graph().parse(data=serialize_relationship_shapes([shape]), format="turtle")
+    assert not list(shapes.triples((URIRef(shape["uri"]), SH["class"], None)))
+    alternatives = shapes.items(shapes.value(URIRef(shape["uri"]), SH["or"]))
+    assert {str(shapes.value(item, SH["class"])) for item in alternatives} == {NS + "Payment", NS + "Expense"}
+    data = Graph().parse(data=statements.rdf, format="turtle")
+    # This temporary projection is only for validating value types. It must not
+    # materialize conditional approvals in the authoritative base RDF.
+    assert (URIRef(ALICE), URIRef(NS + "reviews"), URIRef(PAYMENT)) not in data
+    assert validate(data, shacl_graph=shapes)[0]  # No relationship is required.
+    for target in (PAYMENT, other):
+        data.add((URIRef(ALICE), URIRef(NS + "reviews"), URIRef(target)))
+    assert validate(data, shacl_graph=shapes)[0]  # Either type is allowed.
+    data.add((URIRef(ALICE), URIRef(NS + "reviews"), URIRef(ALICE)))
+    assert not validate(data, shacl_graph=shapes)[0]
+    response["relationship_shapes"][-1]["value_classes"].pop()
+    with pytest.raises(ValidationError):
+        normalize_provenance_model(response, projection, statements.rdf, provider="test", model="recorded-model")
 
 
 @pytest.mark.parametrize(

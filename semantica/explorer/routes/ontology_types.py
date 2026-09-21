@@ -134,13 +134,16 @@ def _property_definition(graph, key, uri):
         for declared, _ in _declarations(graph, target)
     )
     owner = _properties(target).get("scheme_uri") if loaded else None
-    return {
+    definition = {
         "key": key,
         "property_uri": uri,
         "label": _label(target, key) if loaded else key,
         "loaded": loaded,
         "ontology_uri": owner if isinstance(owner, str) else None,
     }
+    if loaded and _properties(target).get("schema_role") == "provenance":
+        definition["schema_role"] = "provenance"
+    return definition
 
 
 def _property_definitions(graph, node):

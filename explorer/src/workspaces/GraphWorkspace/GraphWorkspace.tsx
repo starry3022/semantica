@@ -1230,6 +1230,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
   const [graphReady, setGraphReady] = useState(false);
   const [graphVersion, setGraphVersion] = useState(0);
   const [includeOntologySchema, setIncludeOntologySchema] = useState(false);
+  const [includeProvenance, setIncludeProvenance] = useState(false);
   const [typeLinksSelection, setTypeLinksSelection] = useState<{ nodeId: string; version: number } | null>(null);
   const [markdownDraftDirty, setMarkdownDraftDirty] = useState(false);
   const markdownRefreshGuard = useMemo(() => new NodeMarkdownRefreshGuard(), []);
@@ -1544,8 +1545,8 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
 
   const knowledgeScope = useMemo(() => {
     void graphVersion;
-    return createKnowledgeGraphScope(graph, includeOntologySchema);
-  }, [graphVersion, includeOntologySchema]);
+    return createKnowledgeGraphScope(graph, includeOntologySchema, includeProvenance);
+  }, [graphVersion, includeOntologySchema, includeProvenance]);
   const scopedGraph = useMemo(() => {
     void graphVersion;
     return projectApprovalGroupLabels(knowledgeScope.graph);
@@ -1657,6 +1658,21 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
       setViewMode("full");
     }
   }, [confirmDiscardMarkdownDraft, knowledgeScope.schemaNodeIds, selectedNodeId]);
+
+  const handleProvenanceScopeChange = useCallback((include: boolean) => {
+    if (!confirmDiscardMarkdownDraft()) return;
+    setIncludeProvenance(include);
+    setSelectedEdgeId("");
+    setPathResult(null);
+    setSearchResults([]);
+    setSearchError("");
+    setLastGroupedSelectedNodeId("");
+    if ((!include && knowledgeScope.provenanceNodeIds.has(selectedNodeId)) || (selectedNodeId && !graph.hasNode(selectedNodeId))) {
+      setSelectedNodeId("");
+      setFocusedNodeId("");
+      setViewMode("full");
+    }
+  }, [confirmDiscardMarkdownDraft, knowledgeScope.provenanceNodeIds, selectedNodeId]);
 
   const [previousScopedGraph, setPreviousScopedGraph] = useState(scopedGraph);
   if (previousScopedGraph !== scopedGraph) {
@@ -1786,6 +1802,11 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
       setViewMode("full");
       setFocusedNodeId("");
     }
+    if (knowledgeScope.provenanceNodeIds.has(nodeId) && !includeProvenance) {
+      setIncludeProvenance(true);
+      setViewMode("full");
+      setFocusedNodeId("");
+    }
 
     if (!graph.hasNode(nodeId) && currentDisplayGraph.hasNode(nodeId)) {
       setLastGroupedSelectedNodeId(nodeId);
@@ -1800,7 +1821,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
       setFocusedNodeId(nextSelectedNodeId);
       setIsLayoutRunning(false);
     }
-  }, [confirmDiscardMarkdownDraft, includeOntologySchema, instanceTypes.snapshot, knowledgeScope.schemaNodeIds, onOpenOntologyEntity, scopedGraph, selectedNodeId, showInstanceTypes, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
+  }, [confirmDiscardMarkdownDraft, includeOntologySchema, includeProvenance, instanceTypes.snapshot, knowledgeScope.schemaNodeIds, knowledgeScope.provenanceNodeIds, onOpenOntologyEntity, scopedGraph, selectedNodeId, showInstanceTypes, viewMode]);  // Note: ego/heatmap/distanceMode effects re-run automatically when selectedNodeId changes
 
   useEffect(() => {
     if (!isActive || !externalFocusNodeId || externalFocusToken == null) return;
@@ -1817,6 +1838,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
     // is visible in the full graph before the scene pans to it.
     setViewMode("full");
     if (knowledgeScope.schemaNodeIds.has(externalFocusNodeId)) setIncludeOntologySchema(true);
+    if (knowledgeScope.provenanceNodeIds.has(externalFocusNodeId)) setIncludeProvenance(true);
     setSelectedNodeId(externalFocusNodeId);
     setSelectedEdgeId("");
     window.setTimeout(() => {
@@ -1829,6 +1851,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
     graphReady,
     isActive,
     knowledgeScope.schemaNodeIds,
+    knowledgeScope.provenanceNodeIds,
     selectedNodeId,
   ]);
 
@@ -1908,6 +1931,10 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
       if (data.path?.some((nodeId) => knowledgeScope.schemaNodeIds.has(nodeId))) {
         setIncludeOntologySchema(true);
       }
+      if (data.path?.some((nodeId) => knowledgeScope.provenanceNodeIds.has(nodeId))
+        || data.edge_ids?.some((edgeId) => knowledgeScope.provenanceEdgeIds.has(edgeId))) {
+        setIncludeProvenance(true);
+      }
       setPathResult(data);
       if (data.path?.length) {
         const lastStep = data.path[data.path.length - 1];
@@ -1919,7 +1946,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
       console.error("[GraphWorkspace] path trace failed", pathError);
       setPathResult(null);
     }
-  }, [inspectableNodeId, knowledgeScope.schemaNodeIds, pathTargetId]);
+  }, [inspectableNodeId, knowledgeScope.schemaNodeIds, knowledgeScope.provenanceNodeIds, knowledgeScope.provenanceEdgeIds, pathTargetId]);
 
   const handleDownloadProvenance = useCallback(async (format: "json" | "markdown") => {
     if (!inspectableNodeId) return;
@@ -2347,7 +2374,7 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
   const displayResult = useMemo(() => projectInstanceTypes(
     baseDisplayResult, showInstanceTypes ? instanceTypes.snapshot : null, graph,
   ), [baseDisplayResult, instanceTypes.snapshot, showInstanceTypes]);
-  const hiddenSchemaCount = knowledgeScope.hiddenNodeCount - [...displayResult.classReferences].filter(id => knowledgeScope.schemaNodeIds.has(id) && !scopedGraph.hasNode(id)).length;
+  const hiddenSchemaCount = knowledgeScope.hiddenSchemaNodeCount - [...displayResult.classReferences].filter(id => knowledgeScope.schemaNodeIds.has(id) && !scopedGraph.hasNode(id)).length;
   const baseDisplayState = useMemo(
     () => (
       viewMode === "grouped"
@@ -3176,6 +3203,9 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                   {hiddenSchemaCount > 0 ? (
                     <MetricChip>{hiddenSchemaCount.toLocaleString()} schema nodes hidden</MetricChip>
                   ) : null}
+                  {knowledgeScope.hiddenProvenanceNodeCount > 0 ? (
+                    <MetricChip>{knowledgeScope.hiddenProvenanceNodeCount.toLocaleString()} source & citation nodes hidden</MetricChip>
+                  ) : null}
                   {displayResult.links.size > 0 ? <MetricChip>{displayResult.links.size} class links · view only</MetricChip> : null}
                   {activeNodeCount !== null ? (
                     <MetricChip tone="success">{activeNodeCount.toLocaleString()} active</MetricChip>
@@ -3216,6 +3246,10 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                         }
                       }
                     }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAPH_THEME.ui.text.body }}>
+                        <input type="checkbox" checked={includeProvenance} onChange={(event) => handleProvenanceScopeChange(event.target.checked)} />
+                        Show evidence & provenance links
+                      </label>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAPH_THEME.ui.text.body }}>
                         <input type="checkbox" checked={includeOntologySchema} onChange={(event) => handleSchemaScopeChange(event.target.checked)} />
                         Include ontology schema
@@ -3417,8 +3451,8 @@ export function GraphWorkspace({ isActive = true, externalFocusNodeId, externalF
                   {graphReady && !showLoadingOverlay && !hasGraphContent && knowledgeScope.hiddenNodeCount > 0 ? (
                     <div className="graph-loading-overlay" role="status">
                       <div className="graph-loading-card" style={{ color: GRAPH_THEME.ui.text.body }}>
-                        <strong>No instance, rule, or evidence nodes in this graph.</strong>
-                        <p>This graph contains ontology schema only. Enable “Include ontology schema” to browse its definitions.</p>
+                        <strong>No nodes are visible with the current graph settings.</strong>
+                        <p>Use Graph tools to show evidence and provenance links or include ontology schema.</p>
                       </div>
                     </div>
                   ) : null}

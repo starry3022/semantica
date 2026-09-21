@@ -42,7 +42,7 @@ function isSchemaDefinition(attributes: NodeAttributes): boolean {
 }
 
 /** A display projection only: never remove nodes or rewrite attributes in the store. */
-export function createKnowledgeGraphScope(sourceGraph: SourceGraph, includeOntologySchema = false) {
+export function createKnowledgeGraphScope(sourceGraph: SourceGraph, includeOntologySchema = false, includeProvenance = false) {
   const definitions = new Set<string>();
   sourceGraph.forEachNode((nodeId, attributes) => {
     if (isSchemaDefinition(attributes as NodeAttributes)) definitions.add(nodeId);
@@ -78,11 +78,48 @@ export function createKnowledgeGraphScope(sourceGraph: SourceGraph, includeOntol
     if (schemaOnly) schemaNodeIds.add(nodeId);
   }
 
-  const scopedGraph = includeOntologySchema || schemaNodeIds.size === 0 ? sourceGraph : sourceGraph.copy();
-  if (scopedGraph !== sourceGraph) schemaNodeIds.forEach((nodeId) => scopedGraph.dropNode(nodeId));
+  // Use only explicit, loaded ontology roles and type declarations. Labels,
+  // local names, and proximity to an evidence node do not classify a node.
+  const provenanceTerms = new Set([...definitions].filter((nodeId) =>
+    sourceGraph.getNodeAttributes(nodeId).properties?.schema_role === "provenance"));
+  const provenanceNodeIds = new Set<string>();
+  sourceGraph.forEachNode((nodeId, attributes) => {
+    if (schemaNodeIds.has(nodeId)) return;
+    const properties = attributes.properties ?? {};
+    const types: unknown[] = [attributes.nodeType, properties["rdf:type"], properties["http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]].flat();
+    if (types.some((type) => typeof type === "string" && provenanceTerms.has(type))) provenanceNodeIds.add(nodeId);
+  });
+  sourceGraph.forEachEdge((_edgeId, attributes, source, target) => {
+    if (compactTerm(attributes.edgeType) === "rdf:type" && provenanceTerms.has(target) && !schemaNodeIds.has(source)) {
+      provenanceNodeIds.add(source);
+    }
+  });
+  const provenanceEdgeIds = new Set<string>();
+  sourceGraph.forEachEdge((edgeId, attributes, source, target) => {
+    if (provenanceTerms.has(attributes.edgeType) || provenanceNodeIds.has(source) || provenanceNodeIds.has(target)) {
+      provenanceEdgeIds.add(edgeId);
+    }
+  });
+
+  const hiddenNodeIds = new Set([
+    ...(!includeOntologySchema ? schemaNodeIds : []),
+    ...(!includeProvenance ? provenanceNodeIds : []),
+  ]);
+  const needsProjection = hiddenNodeIds.size > 0 || (!includeProvenance && provenanceEdgeIds.size > 0);
+  const scopedGraph = needsProjection ? sourceGraph.copy() : sourceGraph;
+  if (needsProjection) {
+    hiddenNodeIds.forEach((nodeId) => scopedGraph.dropNode(nodeId));
+    if (!includeProvenance) provenanceEdgeIds.forEach((edgeId) => {
+      if (scopedGraph.hasEdge(edgeId)) scopedGraph.dropEdge(edgeId);
+    });
+  }
   return {
     graph: scopedGraph,
     schemaNodeIds,
+    provenanceNodeIds,
+    provenanceEdgeIds,
+    hiddenSchemaNodeCount: includeOntologySchema ? 0 : schemaNodeIds.size,
+    hiddenProvenanceNodeCount: includeProvenance ? 0 : provenanceNodeIds.size,
     hiddenNodeCount: sourceGraph.order - scopedGraph.order,
     hiddenEdgeCount: sourceGraph.size - scopedGraph.size,
   };

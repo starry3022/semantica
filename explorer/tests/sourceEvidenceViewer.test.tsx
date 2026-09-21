@@ -90,6 +90,50 @@ test.beforeEach(() => {
 });
 test.afterEach(cleanup);
 
+test("node citations stay in the source viewer and related relationships use their explicit edge ID", async () => {
+  const opened: string[] = [];
+  globalThis.fetch = async () => response({ ...bundle, related_relationships: [{ edge_id: "edge-1", predicate: "https://example.test/approves", source_label: "负责人", target_label: "采购申请", assertion_count: 2 }] });
+  const view = render(<GraphInspectorPanel {...defaults} nodeId="rule-1" onInspectRelationship={(id) => opened.push(id)} />);
+  const entry = await view.findByRole("button", { name: "Open source material" });
+  const panel = view.getByRole("region", { name: "Source material & evidence" });
+  assert.match(panel.textContent || "", /Sources: 1 material · 2 citations/);
+  const relationships = view.getByRole("region", { name: "Business relationships" });
+  assert.equal(panel.contains(relationships), false);
+  assert.match(relationships.textContent || "", /Business relationships · 1/);
+  assert.equal(within(panel).queryByRole("button", { name: /负责人 → approves → 采购申请/ }), null);
+  assert.equal(within(panel).queryByRole("button", { name: /^View evidence / }), null);
+  assert.ok(!panel.textContent?.includes(primary.quote));
+  assert.ok(!panel.textContent?.includes(supporting.quote));
+  fireEvent.click(entry);
+  const dialog = view.getByRole("dialog");
+  assert.equal(within(dialog).getByLabelText("Evidence list").querySelectorAll("button").length, 2);
+  fireEvent.click(within(dialog).getByRole("button", { name: /Supporting.*C001/ }));
+  assert.equal(dialog.querySelector("mark")?.textContent, supporting.quote);
+  fireEvent.click(view.getByRole("button", { name: "Close source material" }));
+  fireEvent.click(within(relationships).getByRole("button", { name: /负责人 → approves → 采购申请/ }));
+  assert.deepEqual(opened, ["edge-1"]);
+});
+
+test("assertions with the same business edge keep their conditions and evidence separate", async () => {
+  globalThis.fetch = async () => response({ ...bundle, selection: { kind: "edge", id: "edge-1", label: "审批" }, assertions: [
+    { assertion_id: "assertion-1", qualifiers: { condition: "小额采购", negation: false }, evidence_ids: [primary.id], fact_status: "candidate", review_status: "unreviewed" },
+    { assertion_id: "assertion-2", qualifiers: { condition: "大额采购", negation: true }, evidence_ids: [supporting.id], fact_status: "candidate", review_status: "unreviewed" },
+    { assertion_id: "assertion-3", qualifiers: { condition: "未提供依据" }, evidence_ids: [], fact_status: "candidate", review_status: "unreviewed" },
+  ] });
+  const view = render(<RelationshipSourceEvidence edgeIds={["edge-1"]} />);
+  const first = await view.findByRole("article", { name: "Candidate assertion 1" });
+  const second = view.getByRole("article", { name: "Candidate assertion 2" });
+  assert.match(first.textContent || "", /小额采购.*false/s);
+  assert.doesNotMatch(first.textContent || "", /支持😀条款/);
+  assert.match(second.textContent || "", /大额采购.*true/s);
+  assert.equal(within(view.getByRole("article", { name: "Candidate assertion 3" })).queryByRole("button"), null);
+  fireEvent.click(within(second).getByRole("button", { name: "View evidence 1" }));
+  const dialog = view.getByRole("dialog");
+  assert.equal(dialog.querySelector("mark")?.textContent, supporting.quote);
+  assert.equal(within(dialog).getByLabelText("Evidence list").querySelectorAll("button").length, 1);
+  assert.equal(within(dialog).queryByRole("button", { name: /Primary/ }), null);
+});
+
 test("a retained inactive workspace hides its body portal and restores the chosen supporting evidence on return", async () => {
   const content = <GraphInspectorPanel {...defaults} nodeId="rule-1" />;
   const view = render(<RetainedWorkspace active>{content}</RetainedWorkspace>);

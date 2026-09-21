@@ -31,6 +31,7 @@ import type { OntologyEvidenceContext, OntologyGraphEdge, OntologyGraphNode } fr
 import { OntologyRuleEvidencePanel } from "./OntologyRuleEvidencePanel";
 import { OntologyTermDetails } from "./OntologyTermDetails";
 import { ClassPropertiesPanel } from "./ClassPropertiesPanel";
+import { declaredRelationshipEdges, isDeclaredRelationship, relationshipEdgeLabel } from "./relationshipShapes";
 import { ClassInstancesPanel } from "./ClassInstancesPanel";
 import {
   canEditOwnedOntologyTerm,
@@ -47,6 +48,7 @@ type OntologyNodeData = {
   label?: string;
   type?: string;
   entityType?: EditorEntityType;
+  schemaRole?: string;
   description?: string;
 };
 
@@ -72,6 +74,10 @@ const handleStyle: React.CSSProperties = {
 };
 
 const ontologyFlowThemeCss = `
+  .ontology-editor-flow .react-flow__edge-textwrapper {
+    pointer-events: all;
+    cursor: pointer;
+  }
   .ontology-editor-flow .react-flow__controls {
     overflow: hidden;
     border: 1px solid rgba(127, 208, 255, 0.2);
@@ -110,12 +116,14 @@ const ontologyFlowThemeCss = `
 const classNodeStyle: React.CSSProperties = {
   padding: "12px 16px",
   borderRadius: "8px",
-  background: "linear-gradient(135deg, rgba(74, 163, 255, 0.15), rgba(74, 163, 255, 0.05))",
+  background: "linear-gradient(135deg, #172b43, #0d1c2e)",
   border: "1px solid rgba(127, 208, 255, 0.3)",
   color: "#ebf3ff",
   fontSize: "13px",
   fontWeight: "600",
-  minWidth: "140px",
+  width: "200px",
+  boxSizing: "border-box",
+  overflowWrap: "anywhere",
   textAlign: "center",
   boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
 };
@@ -124,12 +132,14 @@ const classNodeHeader: React.CSSProperties = {
   fontSize: "14px",
   fontWeight: "700",
   marginBottom: "4px",
+  lineHeight: 1.5,
 };
 
 const classNodeSub: React.CSSProperties = {
   fontSize: "11px",
   color: "#8fa8c6",
   fontWeight: "500",
+  lineHeight: 1.5,
 };
 
 interface DraftDiff {
@@ -166,21 +176,27 @@ function classifyEditorNode(node: OntologyGraphNode): OntologyNodeData["entityTy
 function layoutEditorNodes(inputNodes: OntologyNode[]): OntologyNode[] {
   const properties = inputNodes.filter((node) => node.data.entityType === "property");
   const targets = inputNodes.filter((node) => (
-    node.data.entityType === "class" || node.data.entityType === "external"
+    (node.data.entityType === "class" || node.data.entityType === "external") && node.data.schemaRole !== "provenance"
   ));
+  const provenance = inputNodes.filter((node) => (node.data.entityType === "class" || node.data.entityType === "external") && node.data.schemaRole === "provenance");
   const context = inputNodes.filter((node) => (
     node.data.entityType !== "property"
     && node.data.entityType !== "class"
     && node.data.entityType !== "external"
   ));
-  const height = Math.max(360, Math.max(properties.length, targets.length) * 180);
+  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(targets.length))));
+  const rows = Math.ceil(targets.length / columns);
+  const height = Math.max(360, properties.length * 130, rows * 160, provenance.length * 160);
   const positions = new Map<string, { x: number; y: number }>();
 
   properties.forEach((node, index) => {
-    positions.set(node.id, { x: 0, y: ((index + 1) * height) / (properties.length + 1) });
+    positions.set(node.id, { x: 0, y: (height - (properties.length - 1) * 130) / 2 + index * 130 });
   });
   targets.forEach((node, index) => {
-    positions.set(node.id, { x: 600, y: ((index + 1) * height) / (targets.length + 1) });
+    positions.set(node.id, { x: 500 + (index % columns) * 340, y: (height - (rows - 1) * 160) / 2 + Math.floor(index / columns) * 160 });
+  });
+  provenance.forEach((node, index) => {
+    positions.set(node.id, { x: 620 + columns * 340, y: height / 2 + (index - (provenance.length - 1) / 2) * 160 });
   });
   context.forEach((node, index) => {
     positions.set(node.id, { x: 300 + index * 220, y: height + 120 });
@@ -205,21 +221,54 @@ function buildEditorElements(apiNodes: OntologyGraphNode[], apiEdges: OntologyGr
       label: nodeLabel(node),
       type: node.type,
       entityType: classifyEditorNode(node),
+      schemaRole: typeof node.properties?.schema_role === "string" ? node.properties.schema_role : undefined,
       description: typeof node.properties?.["rdfs:comment"] === "string" ? node.properties["rdfs:comment"] : undefined,
     },
   })));
-  const edges: OntologyEdge[] = apiEdges.map((edge, index) => ({
-    id: edge.id || `${edge.source}:${edge.type}:${edge.target}:${index}`,
-    source: edge.source,
-    target: edge.target,
-    label: edge.type,
-    type: "default",
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: { stroke: "rgba(127, 208, 255, 0.72)", strokeWidth: 1.5 },
-    labelStyle: { fill: "#c8dcf5", fontSize: 11, fontWeight: 600 },
-    labelBgStyle: { fill: "#07111f", fillOpacity: 0.9 },
-  }));
+  const nodeById = new Map(apiNodes.map((node) => [node.id, node]));
+  const edges: OntologyEdge[] = declaredRelationshipEdges(apiNodes, apiEdges).map((edge, index) => {
+    const provenance = edge.properties?.schema_role === "provenance"
+      || nodeById.get(edge.source)?.properties?.schema_role === "provenance";
+    const color = provenance ? "#91b6ba" : "#8abce3";
+    return {
+      id: edge.id || `${edge.source}:${edge.type}:${edge.target}:${index}`,
+      source: edge.source,
+      target: edge.target,
+      label: relationshipEdgeLabel(edge, apiNodes),
+      data: { ...edge.properties },
+      type: "default",
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+      style: { stroke: color, strokeWidth: provenance ? 1 : 1.4, strokeOpacity: provenance ? 0.55 : 0.8 },
+      zIndex: -1,
+      labelStyle: { fill: "#c8dcf5", fontSize: 12, fontWeight: 500 },
+      labelBgStyle: { fill: "#07111f", fillOpacity: 1 },
+    };
+  });
   return { nodes, edges };
+}
+
+function selectedRelationshipDiagram(nodes: OntologyNode[], edges: OntologyEdge[], selected: OntologyNode | OntologyEdge | null, entire: boolean) {
+  const classId = selected && "source" in selected
+    ? isDeclaredRelationship(selected.data) ? selected.source : null
+    : selected?.data.entityType === "class" ? selected.id : null;
+  const declarations = edges.filter((edge) => isDeclaredRelationship(edge.data) && (edge.source === classId || edge.target === classId));
+  if (!declarations.length || entire) return { nodes, edges, scoped: false, available: !!declarations.length };
+  // In the relationship view, the property is the labelled edge. Its definition
+  // opens on selection; displaying it again as an unconnected box is misleading.
+  const ids = new Set(declarations.flatMap((edge) => [edge.source, edge.target]));
+  const related = nodes.filter((node) => ids.has(node.id));
+  const incoming = related.filter((node) => node.id !== classId && declarations.some((edge) => edge.source === node.id && edge.target === classId));
+  const outgoing = related.filter((node) => node.id !== classId && !incoming.includes(node));
+  const height = Math.max(0, (Math.max(incoming.length, outgoing.length) - 1) * 160);
+  const centerX = incoming.length ? 560 : 0;
+  return {
+    scoped: true, available: true,
+    nodes: related.map((node) => ({ ...node, position: node.id === classId
+      ? { x: centerX, y: height / 2 }
+      : incoming.includes(node) ? { x: 0, y: height / 2 + (incoming.indexOf(node) - (incoming.length - 1) / 2) * 160 }
+        : { x: centerX + 560, y: height / 2 + (outgoing.indexOf(node) - (outgoing.length - 1) / 2) * 160 } })),
+    edges: declarations,
+  };
 }
 
 export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStart }: { evidenceContext?: OntologyEvidenceContext; onJumpToGraphNode?: (nodeId: string) => void; toolbarStart?: ReactNode }) {
@@ -228,14 +277,30 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
   const [selectedElement, setSelectedElement] = useState<OntologyNode | OntologyEdge | null>(null);
   const selectedNodeId = selectedElement && !("source" in selectedElement) ? selectedElement.id : "";
   const selectedEdgeId = selectedElement && "source" in selectedElement ? selectedElement.id : "";
-  const displayedNodes = useMemo(() => nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })), [nodes, selectedNodeId]);
-  const displayedEdges = useMemo(() => edges.map((edge) => ({ ...edge, selected: edge.id === selectedEdgeId })), [edges, selectedEdgeId]);
+  const [entireOntology, setEntireOntology] = useState(false);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const diagram = useMemo(() => selectedRelationshipDiagram(nodes, edges, selectedElement, entireOntology), [nodes, edges, selectedElement, entireOntology]);
+  const displayedNodes = useMemo(() => diagram.nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })), [diagram.nodes, selectedNodeId]);
+  const displayedEdges = useMemo(() => diagram.edges.map((edge) => ({ ...edge,
+    selected: edge.id === selectedEdgeId,
+    // Overview labels compete with node text. Reveal one on hover/selection;
+    // keep all property labels visible in the selected class neighborhood.
+    label: diagram.scoped || edge.id === selectedEdgeId || edge.id === hoveredEdgeId ? edge.label : undefined,
+    style: { ...edge.style, ...(edge.id === selectedEdgeId || edge.id === hoveredEdgeId ? { strokeOpacity: 1 } : {}) },
+  })), [diagram.edges, diagram.scoped, selectedEdgeId, hoveredEdgeId]);
   const [registry, setRegistry] = useState<RegistryEntry[]>([]);
   const [ontologyUri, setOntologyUri] = useState<string>("");
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<OntologyNode, OntologyEdge> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [focusRequest, setFocusRequest] = useState<OntologyFocusRequest | null>(null);
-  useOntologySelectionFocus(flowInstance, nodes, focusRequest, canvasRef);
+  const relationshipFocus = useMemo(() => {
+    if (!focusRequest?.nodeId) return focusRequest;
+    const relatedNodeIds = edges.filter((edge) => isDeclaredRelationship(edge.data)
+      && (edge.source === focusRequest.nodeId || edge.target === focusRequest.nodeId))
+      .flatMap((edge) => diagram.scoped ? [edge.source, edge.target] : [edge.source, edge.target, String(edge.data!.property_uri)]);
+    return relatedNodeIds.length ? { ...focusRequest, relatedNodeIds: [...new Set(relatedNodeIds)] } : focusRequest;
+  }, [focusRequest, edges, diagram.scoped]);
+  useOntologySelectionFocus(flowInstance, diagram.nodes, relationshipFocus, canvasRef);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState("");
   const [schema, setSchema] = useState<{ nodes: OntologyGraphNode[]; edges: OntologyGraphEdge[] }>({ nodes: [], edges: [] });
@@ -427,6 +492,7 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
 
   const autoLayout = useCallback(() => {
     setNodes(layoutEditorNodes(nodes));
+    setFocusRequest({ nodeId: null });
   }, [nodes, setNodes]);
 
   const selectNode = useCallback((node: OntologyNode) => {
@@ -667,6 +733,12 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
           <Layout size={14} />
           Auto Layout
         </button>
+        {diagram.available ? <label style={{ color: "#b9d8ce", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={entireOntology} onChange={(event) => {
+            setEntireOntology(event.target.checked);
+            setFocusRequest({ nodeId: null });
+          }} />Show entire ontology
+        </label> : null}
         <div style={{ flex: 1 }} />
         <details ref={toolsRef} style={{ position: "relative", color: "#8fa8c6", fontSize: 12, flexShrink: 0 }}>
           <summary style={toolbarButtonStyle}>Tools <ChevronDown size={13} /></summary>
@@ -699,17 +771,21 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
         <div ref={canvasRef} style={{ flex: 1, minHeight: 0, minWidth: 0, position: "relative" }}>
           <ReactFlow
             className="ontology-editor-flow"
+            minZoom={0.1}
             nodes={displayedNodes}
             edges={displayedEdges}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={readOnly ? undefined : onConnect}
-            nodesDraggable={!readOnly}
-            nodesConnectable={!readOnly}
+            nodesDraggable={!readOnly && !diagram.scoped}
+            nodesConnectable={!readOnly && !diagram.scoped}
             deleteKeyCode={readOnly ? null : "Backspace"}
             onInit={setFlowInstance}
             onNodeClick={(_, node) => selectNode(node)}
-            onEdgeClick={(_, edge) => { setSelectedElement(edge); setFocusRequest(null); }}
+            onEdgeClick={(_, edge) => { setSelectedElement(edges.find((item) => item.id === edge.id) || edge); setFocusRequest(null); }}
+            onEdgeMouseEnter={(_, edge) => setHoveredEdgeId(edge.id)}
+            onEdgeMouseLeave={() => setHoveredEdgeId(null)}
+            elevateEdgesOnSelect={false}
             onPaneClick={() => { setSelectedElement(null); setFocusRequest(null); clearEntitySelection(); }}
             onNodeContextMenu={readOnly ? undefined : handleNodeContextMenu}
             onEdgeContextMenu={readOnly ? undefined : handleEdgeContextMenu}
@@ -795,6 +871,16 @@ export function OntologyEditor({ evidenceContext, onJumpToGraphNode, toolbarStar
                 <div style={{ color: "#ebf3ff", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{selectedElement.data.description || "Not declared"}</div>
                 <div style={{ color: "#8fa8c6", fontSize: 12, marginTop: 12 }}>{selectedElement.data.type}</div>
               </> : null}
+              {"source" in selectedElement && isDeclaredRelationship(selectedElement.data) ? <section aria-label="Declared relationship" style={{ display: "grid", gap: 10, color: "#c8dcf5", fontSize: 13 }}>
+                <strong>{nodes.find((node) => node.id === selectedElement.source)?.data.label} → {String(selectedElement.label)} → {nodes.find((node) => node.id === selectedElement.target)?.data.label}</strong>
+                <div>{String(selectedElement.data?.label || "")}</div>
+                <div>{String(selectedElement.data?.comment || "")}</div>
+                <div>Declared relationship · {selectedElement.data?.definition_source === "llm" ? "LLM draft · " : ""}{selectedElement.data?.schema_kind === "relationship_shape" ? "No minimum count" : "OWL domain / range"}</div>
+                <button type="button" style={toolbarButtonStyle} onClick={() => {
+                  const property = nodes.find((node) => node.id === selectedElement.data?.property_uri);
+                  if (property) selectNode(property);
+                }}>View property definition</button>
+              </section> : null}
             </>}
             {!("source" in selectedElement) && selectedElement.data.entityType === "class" ? <ClassInstancesPanel key={`${selectedElement.id}:${graphRevision}`} classUri={selectedElement.id} onJumpToGraphNode={onJumpToGraphNode} /> : null}
             {!("source" in selectedElement) && selectedElement.data.entityType === "class" ? <ClassPropertiesPanel

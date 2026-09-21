@@ -2000,6 +2000,16 @@ async def get_ontology_graph(
 
     selected_nodes = list(core_nodes_by_id.values())
     selected_nodes.extend(node for node in external_nodes if node is not None)
+    from ..candidate_provenance import project_relationship_shapes
+
+    declared_nodes, declared_edges = await asyncio.to_thread(
+        project_relationship_shapes, session, uri, core_node_ids
+    )
+    selected_nodes = list({node["id"]: node for node in [*selected_nodes, *declared_nodes]}.values())
+    selected_edges.extend(declared_edges)
+    selected_edges = list({(edge.get("id"), edge["source"], edge["type"], edge["target"]): edge for edge in selected_edges}.values())
+    if len(selected_nodes) > _MAX_ANALYSIS_NODES or len(selected_edges) > _MAX_ANALYSIS_NODES:
+        raise HTTPException(status_code=413, detail=_GRAPH_TOO_LARGE_DETAIL)
     selected_nodes.sort(key=lambda node: str(node.get("id", "")))
     selected_edges.sort(
         key=lambda edge: (

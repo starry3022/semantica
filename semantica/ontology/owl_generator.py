@@ -464,7 +464,7 @@ class OWLGenerator:
                 tracking_id, message="Writing to file..."
             )
             if isinstance(owl_content, str):
-                with open(file_path, "w", encoding="utf-8") as f:
+                with open(file_path, "w", encoding="utf-8", newline="") as f:
                     f.write(owl_content)
             else:
                 # Graph object

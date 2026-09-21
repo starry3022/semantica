@@ -417,6 +417,8 @@ export function GraphInspectorPanel({
     propertyRows.set(uri, row);
   }
   for (const definition of currentTypes?.object_properties ?? []) {
+    // Provenance is displayed through the source viewer, without duplicate targets here.
+    if (definition.schema_role === "provenance") continue;
     const row = propertyRows.get(definition.property_uri) ?? { key: definition.property_uri, values: [], targets: [] };
     propertyRows.set(definition.property_uri, { ...row, definition, targets: definition.targets });
   }
@@ -521,7 +523,7 @@ export function GraphInspectorPanel({
         </div>
       </details>
 
-      <SourceEvidencePanel kind="node" id={effectiveNodeId} />
+      <SourceEvidencePanel kind="node" id={effectiveNodeId} onInspectRelationship={onInspectRelationship} />
 
       {/* Canonical nodes remain editable even when their current body is empty. */}
       <details className="node-panel-collapse" open>

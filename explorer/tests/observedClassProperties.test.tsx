@@ -27,6 +27,22 @@ const response = (payload: unknown, status = 200) => new Response(JSON.stringify
 const originalFetch = globalThis.fetch;
 test.afterEach(() => { cleanup(); globalThis.fetch = originalFetch; });
 
+test("LLM provenance definitions have a separate relationship section without inventing class constraints", async () => {
+  const provenanceOwner = "https://example.test/provenance";
+  const evidence = { ...fields[2], property_uri: provenanceOwner + "#citation", label: "引用证据", ontology_uri: provenanceOwner, schema_role: "provenance" };
+  globalThis.fetch = async () => response({ ...snapshot, observed_properties: [...fields, evidence] });
+  const opened: unknown[] = [];
+  const view = render(<ClassPropertiesPanel classUri={classUri} nodes={[classNode, ...propertyNodes]} edges={[]} onSelectTerm={(uri, owner) => opened.push([uri, owner])} />);
+  const button = await view.findByRole("button", { name: "View property 引用证据（citation）" });
+  const section = view.getByRole("region", { name: "Observed provenance usage" });
+  assert.ok(section.contains(button));
+  assert.match(section.textContent || "", /Used by 1 of 2 instances/);
+  assert.doesNotMatch(section.textContent || "", /Declared on this class|mandatory/);
+  fireEvent.click(button);
+  assert.deepEqual(opened, [[evidence.property_uri, provenanceOwner]]);
+  assert.ok(view.getByRole("heading", { name: "Properties · 3" }));
+});
+
 test("domainless predicates show exact identities and all-instance usage without inventing declarations", async () => {
   const requests: string[] = [];
   const opened: [string, string | null | undefined][] = [];
@@ -45,6 +61,54 @@ test("domainless predicates show exact identities and all-instance usage without
   assert.doesNotMatch(view.container.textContent ?? "", /Declared on this class/);
   assert.equal(new URL(requests[0], "http://localhost").searchParams.get("limit"), "1");
   assert.equal(JSON.stringify(nodes), before);
+});
+
+test("saved class-scoped relationships appear without instances and remain separate from observed-only provenance", async () => {
+  const provenanceOwner = "https://example.test/provenance";
+  const path = provenanceOwner + "#citation";
+  const target = provenanceOwner + "#Evidence";
+  const declaredNodes: OntologyGraphNode[] = [classNode,
+    { id: path, type: "owl:ObjectProperty", content: "引用证据", properties: { scheme_uri: provenanceOwner, schema_role: "provenance" } },
+    { id: target, type: "owl:Class", content: "证据" },
+  ];
+  const edge: OntologyGraphEdge = { id: provenanceOwner + "#shape", source: classUri, type: path, target,
+    properties: { schema_kind: "relationship_shape", shape_uri: provenanceOwner + "#shape", property_uri: path, ontology_uri: provenanceOwner, label: "引用证据", comment: "记录的来源引用", definition_source: "llm" } };
+  const opened: unknown[] = [];
+  globalThis.fetch = async () => response({ ...snapshot, total: 0, instances: [], observed_properties: [] });
+  const view = render(<ClassPropertiesPanel classUri={classUri} nodes={declaredNodes} edges={[edge]} onSelectTerm={(...args) => opened.push(args)} />);
+  await view.findByRole("region", { name: "Declared provenance relationships" });
+  const section = view.getByRole("region", { name: "Declared provenance relationships" });
+  assert.match(section.textContent || "", /Declared relationship for this class/);
+  assert.match(section.textContent || "", /Target: 证据/);
+  assert.match(section.textContent || "", /LLM draft/);
+  assert.equal(view.queryByRole("region", { name: "Observed provenance usage" }), null);
+  fireEvent.click(section.getElementsByTagName("button")[0]);
+  assert.deepEqual(opened, [[path, provenanceOwner]]);
+  cleanup();
+  // Identical endpoints without saved declaration metadata remain instance usage only.
+  const plain = render(<ClassPropertiesPanel classUri={classUri} nodes={declaredNodes} edges={[{ ...edge, properties: {} }]} onSelectTerm={() => {}} />);
+  await plain.findByText(/No declared or observed properties/);
+  assert.equal(plain.queryByRole("region", { name: "Declared provenance relationships" }), null);
+});
+
+test("one business declaration displays alternative target classes once", async () => {
+  globalThis.fetch = async () => response({ ...snapshot, total: 0, instances: [], observed_properties: [] });
+  const path = ns + "reviews";
+  const targets = [ns + "Payment", ns + "Expense"];
+  const graphNodes = [classNode, { id: path, type: "owl:ObjectProperty", content: "审核" },
+    ...targets.map((id, index) => ({ id, type: "owl:Class", content: index ? "报销" : "付款" }))];
+  const edges = targets.map((target, index) => ({ id: "alternative-" + index, source: classUri, target, type: path,
+    properties: { schema_kind: "relationship_shape", shape_uri: ns + "reviewsShape", property_uri: path, ontology_uri: ns,
+      label: "审核业务申请", comment: "保留各自断言条件", value_classes: targets, schema_role: "business", definition_source: "llm" } }));
+  const opened: string[] = [];
+  const view = render(<ClassPropertiesPanel classUri={classUri} nodes={graphNodes} edges={edges} onSelectTerm={(uri) => opened.push(uri)} />);
+  await view.findByRole("button", { name: "View property 审核（reviews）" });
+  assert.ok(view.getByRole("heading", { name: "Properties · 1" }));
+  assert.equal(view.getAllByText("保留各自断言条件").length, 1);
+  assert.match(view.container.textContent || "", /Target alternatives: 付款 or 报销/);
+  fireEvent.click(view.getByRole("button", { name: "报销", exact: true }));
+  assert.deepEqual(opened, [targets[1]]);
+  assert.equal(view.queryByRole("region", { name: "Declared provenance relationships" }), null);
 });
 
 test("declared, inherited, range and observed properties merge once by exact IRI", async () => {

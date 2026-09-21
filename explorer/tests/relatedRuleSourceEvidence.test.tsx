@@ -76,7 +76,7 @@ test("related-only selections count rules and load rule references only when the
   };
   const view = render(<SourceEvidencePanel kind="node" id="role-1" />);
   await view.findByText(/2 related rules/);
-  assert.doesNotMatch(view.container.textContent ?? "", /0 source materials|0 evidence items/);
+  assert.doesNotMatch(view.container.textContent ?? "", /Sources: 0 materials|0 citations/);
   assert.equal(requests.length, 1);
   assert.equal(view.queryByRole("dialog"), null);
   const dialog = await openSources(view);

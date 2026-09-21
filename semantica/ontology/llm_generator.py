@@ -41,6 +41,8 @@ DATATYPES = {
 }
 GENERATION_OPTIONS = (
     "model",
+    "reasoning_effort",
+    "thinking",
     "temperature",
     "max_tokens",
     "max_completion_tokens",

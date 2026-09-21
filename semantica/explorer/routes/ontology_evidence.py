@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...ontology.evidence_context import OntologyEvidenceContext, TermEvidenceAnchor
 from ..dependencies import get_session
+from ..candidate_provenance import is_evidence_link
 from ..session import GraphSession
 from .sources import _properties, _read_node, _source_view, _string
 
@@ -180,7 +181,7 @@ def _related_rules(session, resources, context, ontology_uri, term_uri):
         source_ids = {anchor.source_id for anchor, *_ in validated}
         candidate_rules = set()
         for edge in edges:
-            if edge["type"] != "hasEvidence":
+            if not is_evidence_link(edge["type"], session.graph):
                 continue
             evidence = _read_node(session, edge["target"])
             rule = _read_node(session, edge["source"])

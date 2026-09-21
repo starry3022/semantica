@@ -345,12 +345,13 @@ def test_generation_and_replay_share_validation_and_preserve_provenance_inputs()
 def test_completion_token_override_uses_existing_provider_options():
     generator = llm(proposal())
     generate_candidate_ontology(
-        facts(), generator, max_completion_tokens=5000, temperature=0
+        facts(), generator, max_completion_tokens=5000, temperature=0, reasoning_effort="low"
     )
     assert generator.provider.generate_structured.call_args.kwargs == {
         "model": "test-model",
         "max_completion_tokens": 5000,
         "temperature": 0,
+        "reasoning_effort": "low",
     }
 
 

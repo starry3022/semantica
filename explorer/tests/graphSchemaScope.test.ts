@@ -136,3 +136,83 @@ test("scope recalculates for live additions and changed schema types without alt
   graph.mergeNodeAttributes("live", { nodeType: "Customer" });
   assert.equal(createKnowledgeGraphScope(graph).graph, graph);
 });
+
+function provenanceFixture() {
+  const citationType = "https://provenance.test/QuotedSpan";
+  const sourceType = "https://provenance.test/Material";
+  const citationLink = "https://provenance.test/cites";
+  for (const id of ["manager", "purchase", "payment", "applicant"]) addNode(graph, id, "BusinessObject");
+  for (const [id, source, target] of [["purchase-approval", "manager", "purchase"], ["payment-approval", "manager", "payment"], ["authorization", "applicant", "manager"]]) {
+    addEdge(graph, id, source, target, "https://business.test/relationship");
+  }
+  addNode(graph, citationType, "owl:Class", { schema_role: "provenance" });
+  addNode(graph, sourceType, "owl:Class", { schema_role: "provenance" });
+  addNode(graph, citationLink, "owl:ObjectProperty", { schema_role: "provenance" });
+  addNode(graph, "material", sourceType);
+  for (let index = 0; index < 4; index++) {
+    const id = `citation-${index}`;
+    // Cover exact declarations through node type, scalar/array metadata, and edges.
+    addNode(graph, id, index === 0 ? citationType : "entity", index === 1 ? { "rdf:type": [citationType] }
+      : index === 2 ? { "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": citationType } : {});
+    if (index === 3) addEdge(graph, "citation-type", id, citationType, "rdf:type");
+    addEdge(graph, `cites-${index}`, "manager", id, citationLink);
+    addEdge(graph, `material-${index}`, id, "material", "https://provenance.test/source");
+  }
+  return { citationType, sourceType, citationLink };
+}
+
+test("business graph keeps three relationships while four citations and their material are optional", () => {
+  provenanceFixture();
+  const before = graph.export();
+  const scope = createKnowledgeGraphScope(graph);
+  assert.deepEqual(scope.graph.nodes().sort(), ["applicant", "manager", "payment", "purchase"]);
+  assert.deepEqual(scope.graph.edges().sort(), ["authorization", "payment-approval", "purchase-approval"]);
+  assert.equal(scope.hiddenSchemaNodeCount, 3);
+  assert.equal(scope.hiddenProvenanceNodeCount, 5);
+  for (const mode of ["full", "focused", "grouped"] as const) {
+    const result = resolveDisplayGraph("manager", [], [], mode, { sourceGraph: scope.graph });
+    const members = result.graph.mapNodes((id, attrs) => attrs.properties?.__communityGroup?.memberNodeIds ?? [id]).flat();
+    assert.ok(members.every(id => !scope.provenanceNodeIds.has(id)));
+  }
+  assert.equal(resolveDisplayStateSnapshot("manager", [], "focused", { sourceGraph: scope.graph }).selectedVisibleNeighborIds.length, 3);
+  const expanded = createKnowledgeGraphScope(graph, false, true);
+  assert.equal(expanded.graph.order, 9);
+  assert.equal(expanded.graph.size, 11);
+  assert.equal(expanded.hiddenProvenanceNodeCount, 0);
+  assert.equal(resolveDisplayStateSnapshot("manager", [], "focused", { sourceGraph: expanded.graph }).selectedVisibleNeighborIds.length, 7);
+  assert.deepEqual(graph.export(), before);
+});
+
+test("provenance and schema switches are independent and source data survives every combination", () => {
+  const { citationType, citationLink } = provenanceFixture();
+  // A declared provenance predicate can connect two business objects without hiding either object.
+  addEdge(graph, "business-provenance", "purchase", "payment", citationLink);
+  const before = graph.export();
+  for (const includeSchema of [false, true]) {
+    for (const includeProvenance of [false, true]) {
+      const scope = createKnowledgeGraphScope(graph, includeSchema, includeProvenance);
+      assert.equal(scope.graph.hasNode(citationType), includeSchema);
+      assert.equal(scope.graph.hasNode("citation-0"), includeProvenance);
+      assert.equal(scope.graph.hasEdge("business-provenance"), includeProvenance);
+      assert.ok(scope.graph.hasNode("purchase") && scope.graph.hasNode("payment"));
+      assert.deepEqual(graph.export(), before);
+    }
+  }
+  assert.equal(createKnowledgeGraphScope(graph, true, true).graph, graph);
+});
+
+test("provenance display honors exact loaded roles and updates without guessing from evidence names", () => {
+  const { citationType } = provenanceFixture();
+  addNode(graph, "legacy-evidence", "Evidence");
+  addNode(graph, "other-vocabulary", "https://other.test/QuotedSpan");
+  addNode(graph, "same-label", "BusinessObject", { label: "Evidence", quote: "An ordinary business value" });
+  let scope = createKnowledgeGraphScope(graph);
+  for (const id of ["legacy-evidence", "other-vocabulary", "same-label"]) assert.ok(scope.graph.hasNode(id));
+  graph.setNodeAttribute(citationType, "properties", {});
+  scope = createKnowledgeGraphScope(graph);
+  assert.ok(scope.graph.hasNode("citation-0"));
+  graph.setNodeAttribute(citationType, "properties", { schema_role: "provenance" });
+  scope = createKnowledgeGraphScope(graph);
+  assert.equal(scope.graph.hasNode("citation-0"), false);
+  assert.ok(graph.hasNode("citation-0"));
+});

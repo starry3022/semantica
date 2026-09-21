@@ -39,7 +39,31 @@ export interface SourceView {
   evidence: SourceEvidence[];
   sources: SourceMaterial[];
   related_rules?: SourceRelatedRule[];
+  assertions?: {
+    assertion_id: string | null;
+    qualifiers: Record<string, unknown>;
+    evidence_ids: string[];
+    fact_status: string | null;
+    review_status: string | null;
+  }[];
+  related_relationships?: {
+    edge_id: string;
+    predicate: string;
+    source_label: string;
+    target_label: string;
+    assertion_count: number;
+  }[];
   status: "ok" | "no_evidence";
+}
+
+export function assertionSourceView(view: SourceView, evidenceIds: string[]): SourceView {
+  const evidence = view.evidence.filter((item) => evidenceIds.includes(item.id));
+  return {
+    selection: view.selection,
+    evidence,
+    sources: view.sources.filter((source) => evidence.some((item) => item.source_id === source.source_id && item.source_sha256 === source.source_sha256)),
+    status: evidence.length ? "ok" : "no_evidence",
+  };
 }
 
 export function evidenceSourceIndex(sources: SourceMaterial[], evidence: SourceEvidence): number {

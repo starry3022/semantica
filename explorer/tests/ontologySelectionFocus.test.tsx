@@ -126,3 +126,18 @@ test("an overview request fits once after its nodes are measured, with no repeat
   await frame();
   assert.equal(f.fits.length, 1);
 });
+
+test("class focus keeps its declared relationship endpoints and property visible together", async () => {
+  const f = fixture();
+  f.measure("a", 600, 900); f.measure("evidence", 600, 180); f.measure("property", 0, 500);
+  render(<f.Harness request={{ nodeId: "a", relatedNodeIds: ["a", "evidence", "property"] }} nodeIds={["a", "evidence", "property"]} />);
+  await frame();
+  assert.equal(f.viewportCalls.length, 1);
+  const viewport = f.viewportCalls[0];
+  for (const [x, y] of [[600, 900], [600, 180], [0, 500]]) {
+    assert.ok(viewport.x + x * viewport.zoom >= 0);
+    assert.ok(viewport.y + y * viewport.zoom >= 0);
+    assert.ok(viewport.x + (x + 200) * viewport.zoom <= 960);
+    assert.ok(viewport.y + (y + 80) * viewport.zoom <= 600);
+  }
+});

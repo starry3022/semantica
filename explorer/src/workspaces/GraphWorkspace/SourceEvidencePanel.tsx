@@ -2,13 +2,14 @@ import { useContext, useEffect, useId, useRef, useState, type CSSProperties } fr
 import { createPortal } from "react-dom";
 import { BookOpen, X } from "lucide-react";
 import { GRAPH_THEME } from "./graphTheme";
-import { evidenceSourceIndex, readSourceView, sourceHighlight, type SourceEvidence, type SourceRelatedRule, type SourceView } from "./sourceEvidence";
+import { assertionSourceView, evidenceSourceIndex, readSourceView, sourceHighlight, type SourceEvidence, type SourceRelatedRule, type SourceView } from "./sourceEvidence";
 import { WorkspaceActivityContext } from "../../WorkspaceActivityContext";
 
 interface SourceEvidencePanelProps {
   kind: "node" | "edge";
   id: string;
   initialEvidenceId?: string;
+  onInspectRelationship?: (edgeId: string) => void;
 }
 
 export function SourceEvidencePanel(props: SourceEvidencePanelProps) {
@@ -16,10 +17,10 @@ export function SourceEvidencePanel(props: SourceEvidencePanelProps) {
   return <SourceEvidenceSession key={JSON.stringify([props.kind, props.id, props.initialEvidenceId])} {...props} />;
 }
 
-function SourceEvidenceSession({ kind, id, initialEvidenceId }: SourceEvidencePanelProps) {
+function SourceEvidenceSession({ kind, id, initialEvidenceId, onInspectRelationship }: SourceEvidencePanelProps) {
   const [view, setView] = useState<SourceView | null>(null);
   const [error, setError] = useState("");
-  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useState<{ view: SourceView; evidenceId?: string } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     void readSourceView(kind, id, controller.signal).then((result) => {
@@ -31,6 +32,18 @@ function SourceEvidenceSession({ kind, id, initialEvidenceId }: SourceEvidencePa
   }, [kind, id]);
 
   return (
+    <>
+    {view?.related_relationships?.length ? <section aria-label="Business relationships" style={sectionStyle}>
+      <strong style={headingStyle}>Business relationships · {view.related_relationships.length}</strong>
+      {view.related_relationships.map((relationship) => {
+        const label = `${relationship.source_label} → ${relationship.predicate.split(/[\/#]/).pop()} → ${relationship.target_label}`;
+        return <div key={relationship.edge_id} style={metadataStyle}>
+          {onInspectRelationship ? <button type="button" style={{ ...evidenceButtonStyle, width: "100%" }} title={relationship.predicate}
+            onClick={() => onInspectRelationship(relationship.edge_id)}>{label}<span style={mutedStyle}>View conditions & citations</span></button>
+            : <span>{label}</span>}
+        </div>;
+      })}
+    </section> : null}
     <section style={sectionStyle} aria-label="Source material & evidence">
       <div style={{ color: GRAPH_THEME.ui.text.strong, fontSize: 13, fontWeight: 700 }}>Source material & evidence</div>
       {error ? <div role="alert" style={mutedStyle}>{error}</div> : !view ? (
@@ -39,19 +52,61 @@ function SourceEvidenceSession({ kind, id, initialEvidenceId }: SourceEvidencePa
         <>
           <div style={mutedStyle}>
             {view.sources.length || view.evidence.length ? <>
-              {view.sources.length} source material{view.sources.length === 1 ? "" : "s"} · {view.evidence.length} evidence item{view.evidence.length === 1 ? "" : "s"}
+              Sources: {view.sources.length} material{view.sources.length === 1 ? "" : "s"} · {view.evidence.length} citation{view.evidence.length === 1 ? "" : "s"}
               {view.related_rules?.length ? " · " : ""}
             </> : null}
             {view.related_rules?.length ? `${view.related_rules.length} related rule${view.related_rules.length === 1 ? "" : "s"}` : ""}
           </div>
-          <button type="button" style={buttonStyle} onClick={() => setOpen(true)}>
+          <button type="button" style={buttonStyle} onClick={() => setOpened({ view, evidenceId: initialEvidenceId })}>
             <BookOpen size={14} aria-hidden="true" /> Open source material
           </button>
+          {kind === "edge" && !view.assertions?.length ? <InlineEvidence view={view} onOpen={(evidenceId) => setOpened({ view, evidenceId })} /> : null}
         </>
       ) : <div style={mutedStyle}>No explicit evidence or source material is linked to this {kind === "edge" ? "relationship" : "node"}.</div>}
-      {open && view ? <SourceMaterialDialog view={view} initialEvidenceId={initialEvidenceId} onClose={() => setOpen(false)} /> : null}
+      {view?.assertions?.length ? <section aria-label="Relationship assertions" style={{ display: "grid", gap: 10, maxHeight: 520, overflowY: "auto", padding: 2 }}>
+        <strong style={headingStyle}>Candidate assertions · {view.assertions.length}</strong>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", alignItems: "start", gap: 10 }}>
+        {view.assertions.map((assertion, index) => {
+          const scoped = assertionSourceView(view, assertion.evidence_ids);
+          const labels: Record<string, string> = { condition: "Condition", modality: "Modality", negation: "Negation" };
+          const qualifiers = Object.entries(assertion.qualifiers).filter(([key, value]) => key in labels && value != null);
+          const details = Object.entries(assertion.qualifiers).filter(([key]) => !(key in labels));
+          const renderFields = (fields: [string, unknown][]) => fields.map(([key, value]) => <div key={key}>
+            <dt style={mutedStyle}>{labels[key] || key}</dt>
+            <dd style={{ ...metadataStyle, margin: 0, whiteSpace: "pre-wrap" }}>{typeof value === "string" ? value || '""' : JSON.stringify(value)}</dd>
+          </div>);
+          return <article key={assertion.assertion_id || index} aria-label={`Candidate assertion ${index + 1}`} style={sectionStyle}>
+            <strong style={headingStyle}>Assertion {index + 1}</strong>
+            <div style={mutedStyle}>Fact status: {assertion.fact_status || "Unknown"} · Business review: {assertion.review_status || "Unknown"}</div>
+            <dl style={{ display: "grid", gap: 6, margin: 0 }}>
+              {renderFields(qualifiers)}
+            </dl>
+            {!qualifiers.length ? <div style={mutedStyle}>No qualifiers recorded.</div> : null}
+            <InlineEvidence view={scoped} onOpen={(evidenceId) => setOpened({ view: scoped, evidenceId })} />
+            {!scoped.evidence.length ? <div style={mutedStyle}>No explicit evidence is linked to this assertion.</div> : null}
+            {assertion.assertion_id ? <details style={metadataStyle}><summary>Assertion ID</summary>{assertion.assertion_id}</details> : null}
+            {details.length ? <details style={metadataStyle}><summary>Extraction details</summary><dl style={{ display: "grid", gap: 6 }}>{renderFields(details)}</dl></details> : null}
+          </article>;
+        })}
+        </div>
+      </section> : null}
+      {opened ? <SourceMaterialDialog view={opened.view} initialEvidenceId={opened.evidenceId} onClose={() => setOpened(null)} /> : null}
     </section>
+    </>
   );
+}
+
+function InlineEvidence({ view, onOpen }: { view: SourceView; onOpen: (evidenceId: string) => void }) {
+  return <div aria-label="Linked evidence" style={{ display: "grid", gap: 8 }}>
+    {view.evidence.map((evidence, index) => {
+      const source = view.sources[evidenceSourceIndex(view.sources, evidence)];
+      return <button key={evidence.id} type="button" aria-label={`View evidence ${index + 1}`} style={evidenceButtonStyle} onClick={() => onOpen(evidence.id)}>
+        <strong style={metadataStyle}>{source?.title || evidence.source_id || "Source unavailable"}{source?.version ? ` · ${source.version}` : ""}</strong>
+        <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{evidence.quote || "Quote unavailable"}</span>
+        <span style={mutedStyle}>{evidence.status === "aligned" ? "Citation aligned · Open in source" : `Not located · ${evidence.reason || evidence.status.replaceAll("_", " ")}`}</span>
+      </button>;
+    })}
+  </div>;
 }
 
 export function RelationshipSourceEvidence({ edgeIds }: { edgeIds: string[] }) {

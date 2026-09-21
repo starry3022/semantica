@@ -43,6 +43,7 @@ export interface InstanceObjectProperty {
   label: string;
   loaded: boolean;
   ontology_uri: string | null;
+  schema_role?: "provenance";
   targets: { node_id: string; label: string; edge_ids: string[] }[];
 }
 
@@ -77,6 +78,7 @@ export interface ObservedClassProperty {
   ontology_uri: string | null;
   kinds: ("literal" | "object")[];
   instance_count: number;
+  schema_role?: "provenance";
 }
 
 export interface ClassInstancesSnapshot {

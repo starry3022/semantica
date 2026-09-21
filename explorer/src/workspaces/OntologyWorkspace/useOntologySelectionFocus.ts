@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { FitViewOptions, Viewport } from "@xyflow/react";
 
-export type OntologyFocusRequest = { nodeId: string | null };
+export type OntologyFocusRequest = { nodeId: string | null; relatedNodeIds?: string[] };
 export interface OntologyFocusFlow {
   viewportInitialized: boolean;
   getInternalNode: (id: string) => { measured?: { width?: number; height?: number }; internals: { positionAbsolute: { x: number; y: number } } } | undefined;
@@ -26,14 +26,14 @@ export function useOntologySelectionFocus(
       if (cancelled || completed.current === request) return;
       const { width, height } = element.getBoundingClientRect();
       if (!(width > 0 && height > 0)) return;
-      const targets = request.nodeId ? [request.nodeId] : nodes.map((node) => node.id);
+      const targets = request.nodeId ? [...new Set([request.nodeId, ...(request.relatedNodeIds || [])])] : nodes.map((node) => node.id);
       const measured = targets.map((id) => flow.getInternalNode(id));
       if (measured.some((node) => !(Number(node?.measured?.width) > 0 && Number(node?.measured?.height) > 0))) return;
       if (request.nodeId) {
-        const node = measured[0]!;
-        const nodeWidth = node.measured!.width!;
-        const nodeHeight = node.measured!.height!;
-        const { x, y } = node.internals.positionAbsolute;
+        const x = Math.min(...measured.map((node) => node!.internals.positionAbsolute.x));
+        const y = Math.min(...measured.map((node) => node!.internals.positionAbsolute.y));
+        const nodeWidth = Math.max(...measured.map((node) => node!.internals.positionAbsolute.x + node!.measured!.width!)) - x;
+        const nodeHeight = Math.max(...measured.map((node) => node!.internals.positionAbsolute.y + node!.measured!.height!)) - y;
         if (![x, y, nodeWidth, nodeHeight, width, height].every(Number.isFinite)) return;
         const zoom = Math.max(0.1, Math.min(1.1, (width - 96) / nodeWidth, (height - 96) / nodeHeight));
         // Use the actual remaining canvas, after the detail panel has laid out.

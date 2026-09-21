@@ -23,6 +23,8 @@ _LEGACY_PROMPT_VERSION = "candidate-facts-extraction-v3"
 MAX_SOURCE_CHARS = 32_000
 _IDENTIFIER = r"^[A-Za-z][A-Za-z0-9_]*$"
 _GENERATION_KEYS = {
+    "reasoning_effort",
+    "thinking",
     "temperature",
     "max_tokens",
     "max_completion_tokens",
@@ -655,7 +657,7 @@ def _bundle(
 
 
 def extract_candidate_facts(
-    text: str, *, source_id: str, **private_provider_config
+    text: str, *, source_id: str, review_coverage: bool = False, **private_provider_config
 ) -> dict:
     """Extract reusable LLM-defined candidate entities and relationships.
 
@@ -665,6 +667,8 @@ def extract_candidate_facts(
     """
     from .methods import extract_entities_llm, extract_relations_llm
 
+    if type(review_coverage) is not bool:
+        raise ValidationError("review_coverage must be a boolean.")
     source = _source(text, source_id, private_provider_config.get("max_text_length"))
     config = dict(private_provider_config)
     provider = config.pop("provider", "openai")
@@ -710,7 +714,12 @@ def extract_candidate_facts(
                 )
             ],
         }
-    return _bundle(entities, relations, source, provider, model, captures)
+    result = _bundle(entities, relations, source, provider, model, captures)
+    if review_coverage and entities:
+        from .candidate_coverage_stages import review_candidate_facts
+
+        return review_candidate_facts(text, result, provider=provider, model=model, **config)
+    return result
 
 
 def replay_candidate_facts(text: str, extraction: dict, *, source_id: str) -> dict:
@@ -798,4 +807,8 @@ def replay_candidate_facts(text: str, extraction: dict, *, source_id: str) -> di
         raise ValidationError(
             "Candidate replay prompt or response provenance does not match."
         )
+    if "coverage_review" in extraction:
+        from .candidate_coverage import apply_coverage_review
+
+        result = apply_coverage_review(text, result, extraction["coverage_review"])
     return result

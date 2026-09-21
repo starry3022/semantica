@@ -238,6 +238,8 @@ def test_config_reaches_both_providers_but_credentials_do_not_reach_artifacts():
         api_key="private-test-secret",
         base_url="https://gateway.example/v1",
         max_tokens=1200,
+        reasoning_effort="low",
+        thinking={"type": "disabled"},
         temperature=0.1,
         timeout=12,
     )
@@ -248,6 +250,8 @@ def test_config_reaches_both_providers_but_credentials_do_not_reach_artifacts():
         assert call.kwargs["model"] == "test-model"
     for call in provider.generate_typed.call_args_list:
         assert call.kwargs["max_tokens"] == 1200
+        assert call.kwargs["reasoning_effort"] == "low"
+        assert call.kwargs["thinking"] == {"type": "disabled"}
         assert "api_key" not in call.kwargs
         assert "source_id" not in call.kwargs
     assert "private-test-secret" not in json.dumps(result)
@@ -269,7 +273,10 @@ def test_provider_failure_is_safe_and_never_falls_back():
     provider.generate_structured.assert_not_called()
 
 
-@pytest.mark.parametrize("text", ["", " ", "字" * (MAX_SOURCE_CHARS + 1)])
+@pytest.mark.parametrize(
+    "text", ["", " ", "字" * (MAX_SOURCE_CHARS + 1)],
+    ids=["empty", "blank", "oversized"],
+)
 def test_invalid_or_oversized_source_is_rejected_before_provider_use(text):
     with patch(
         "semantica.semantic_extract.candidate_profile.create_provider"

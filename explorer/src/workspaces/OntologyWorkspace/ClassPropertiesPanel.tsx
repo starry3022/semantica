@@ -4,6 +4,7 @@ import { classPropertyGroups, type ClassProperty } from "./classProperties";
 import { classifyNodeType, compactNodeType } from "./ontologyEditorModel";
 import { formatClassConstraint, readClassExpressions } from "./classExpressions";
 import { propertyDisplayLabel } from "./propertyDisplayLabel";
+import { relationshipShape } from "./relationshipShapes";
 import { loadClassInstances, type ClassInstancesSnapshot, type ObservedClassProperty } from "../GraphWorkspace/instanceTypes";
 
 type Props = {
@@ -20,6 +21,7 @@ type PropertyRow = {
   observed?: ObservedClassProperty;
   declared: boolean;
   incoming: boolean;
+  shapes?: NonNullable<ReturnType<typeof relationshipShape>>[];
 };
 
 export function ClassPropertiesPanel(props: Props) {
@@ -68,12 +70,33 @@ function ClassPropertiesSession({ classUri, nodes, edges, onSelectTerm }: Props)
     row.observed = observed;
     rows.set(row.uri, row);
   }
+  for (const edge of edges) {
+    const shape = relationshipShape(edge);
+    if (!shape || shape.source !== classUri) continue;
+    const node = nodes.find((candidate) => candidate.id === shape.propertyUri && classifyNodeType(candidate.type) === "property");
+    const row: PropertyRow = rows.get(shape.propertyUri) || { uri: shape.propertyUri, declared: false, incoming: false };
+    if (!row.definition && node) row.definition = {
+      node,
+      domain: edges.filter((item) => item.source === node.id && compactNodeType(item.type) === "rdfs:domain").map((item) => item.target),
+      range: edges.filter((item) => item.source === node.id && compactNodeType(item.type) === "rdfs:range").map((item) => item.target),
+      domainExpressions: readClassExpressions(node.properties?.domain_expressions),
+      rangeExpressions: readClassExpressions(node.properties?.range_expressions), inheritedFrom: [],
+    };
+    if (!row.shapes?.some((existing) => existing.uri === shape.uri)) row.shapes = [...(row.shapes || []), shape];
+    rows.set(row.uri, row);
+  }
   const properties: PropertyRow[] = [];
+  const provenance: PropertyRow[] = [];
+  const observedProvenance: PropertyRow[] = [];
   const references: PropertyRow[] = [];
   for (const row of rows.values()) {
-    (row.declared || row.definition?.inheritedFrom.length || row.observed ? properties : references).push(row);
+    if (row.observed?.schema_role === "provenance" || row.definition?.node.properties?.schema_role === "provenance") {
+      (row.declared || row.shapes?.length || row.definition?.inheritedFrom.length ? provenance : row.observed ? observedProvenance : references).push(row);
+      continue;
+    }
+    (row.declared || row.shapes?.length || row.definition?.inheritedFrom.length || row.observed ? properties : references).push(row);
   }
-  const renderRows = (items: PropertyRow[]) => items.map(({ uri, definition, observed, declared, incoming }) => {
+  const renderRows = (items: PropertyRow[]) => items.map(({ uri, definition, observed, declared, incoming, shapes }) => {
       const label = propertyDisplayLabel(uri, definition?.node.content || observed?.label || uri);
       const owner = definition?.node.properties?.scheme_uri;
       const ontologyUri = typeof owner === "string" ? owner : observed?.ontology_uri;
@@ -85,16 +108,26 @@ function ClassPropertiesSession({ classUri, nodes, edges, onSelectTerm }: Props)
         : "Definition not loaded";
       const context = [
         declared ? "Declared on this class" : null,
+        shapes?.length ? "Declared relationship for this class" : null,
         definition?.inheritedFrom.length ? `Declared on parent: ${definition.inheritedFrom.map(name).join(" · ")}` : null,
         incoming ? "Class appears in range" : null,
         observed ? `Used by ${observed.instance_count} of ${snapshot!.total} ${snapshot!.total === 1 ? "instance" : "instances"}` : null,
-        observed && definition && !definition.domain.length && !definition.domainExpressions.length ? "Domain not declared" : null,
+        observed && !declared && !shapes?.length && !definition?.inheritedFrom.length ? "Observed usage only" : null,
+        observed && definition && !shapes?.length && !definition.domain.length && !definition.domainExpressions.length ? "Domain not declared" : null,
         !definition ? missingDefinition : null,
       ].filter(Boolean).join(" · ");
       const comment = definition?.node.properties?.["rdfs:comment"];
       return <article key={uri} data-property-uri={uri} style={rowStyle}>
         <button type="button" aria-label={`View property ${label}`} title={uri} disabled={!canOpen} onClick={() => onSelectTerm(uri, ontologyUri)} style={{ ...buttonStyle, ...(!canOpen ? { cursor: "default", color: mutedStyle.color } : {}) }}>{label}</button>
         <div style={mutedStyle}>{context}</div>
+        {shapes?.map((shape) => <div key={shape.uri} style={mutedStyle}>
+          {shape.valueClasses.length > 1 ? "Target alternatives: " : "Target: "}
+          {shape.valueClasses.map((target, index) => <span key={target}>
+            {index ? " or " : ""}<button type="button" style={buttonStyle} onClick={() => onSelectTerm(target)}>{name(target)}</button>
+          </span>)}
+          {shape.llm ? " · LLM draft" : ""}
+          <div>{shape.comment}</div>
+        </div>)}
         {definition ? <details>
           <summary style={{ ...mutedStyle, cursor: "pointer" }}>Definition{kind ? ` · ${kind}` : ""}</summary>
           <div style={mutedStyle}>Domain: {formatClassConstraint(definition.domain, definition.domainExpressions, name)}</div>
@@ -106,10 +139,18 @@ function ClassPropertiesSession({ classUri, nodes, edges, onSelectTerm }: Props)
   return <section aria-label="Class properties" style={sectionStyle}>
     <h4 style={headingStyle}>Properties{properties.length || snapshot?.observed_properties ? ` · ${properties.length}` : ""}</h4>
     {renderRows(properties)}
+    {provenance.length ? <section aria-label="Declared provenance relationships">
+      <h4 style={headingStyle}>Declared provenance relationships · {provenance.length}</h4>
+      {renderRows(provenance)}
+    </section> : null}
+    {observedProvenance.length ? <section aria-label="Observed provenance usage">
+      <h4 style={headingStyle}>Observed provenance usage · {observedProvenance.length}</h4>
+      {renderRows(observedProvenance)}
+    </section> : null}
     {error ? <p role="alert" style={mutedStyle}>Instance property usage unavailable: {error}</p>
       : !snapshot ? <p role="status" style={mutedStyle}>Loading instance property usage…</p>
       : snapshot.observed_properties === undefined ? <p style={mutedStyle}>Instance property usage unavailable on this server.</p>
-      : !properties.length ? <p style={mutedStyle}>No declared or observed properties in the current graph.</p> : null}
+      : !properties.length && !provenance.length && !observedProvenance.length ? <p style={mutedStyle}>No declared or observed properties in the current graph.</p> : null}
     {references.length ? <details>
       <summary style={{ ...headingStyle, cursor: "pointer" }}>Referenced as range · {references.length}</summary>
       {renderRows(references)}

@@ -484,6 +484,8 @@ def create_bundle_app(bundle_path: str | Path, *, provenance_storage_path=None):
     """Create the standard Explorer app from a verified, relocatable bundle."""
     from ..context.context_graph import ContextGraph
     from .app import create_app
+    from .candidate_provenance import with_provenance_schema
+    from ..ontology.candidate_provenance import validate_provenance_model
     from .routes.ontology import OntologyEntry
     from .session import GraphSession
     from .source_resources import SourceResourceRegistry
@@ -502,6 +504,12 @@ def create_bundle_app(bundle_path: str | Path, *, provenance_storage_path=None):
         raise ValueError(
             "The candidate-graph projection does not match its bundle inputs."
         )
+    provenance = None
+    if "provenance-model.json" in files:
+        model = _json_document(files["provenance-model.json"], "provenance-model.json")
+        validate_provenance_model(model, projection, files["base.ttl"])
+        projection = with_provenance_schema(projection, model)
+        provenance = model["ontology"]
     resources = SourceResourceRegistry()
     for source in manifest["sources"]:
         text = files[source["path"]].decode("utf-8")
@@ -534,6 +542,16 @@ def create_bundle_app(bundle_path: str | Path, *, provenance_storage_path=None):
             property_count=len(ontology["properties"]),
         )
     }
+    if provenance is not None:
+        app.state.ontology_registry[provenance["uri"]] = OntologyEntry(
+            uri=provenance["uri"],
+            name=provenance["name"],
+            format="turtle",
+            status="draft",
+            class_count=len(provenance["classes"]),
+            property_count=len(provenance["properties"]),
+            tags=["provenance"],
+        )
     app.state.candidate_bundle_summary = _json_document(
         files["SUMMARY.json"], "SUMMARY.json"
     )

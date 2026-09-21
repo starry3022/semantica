@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Extract candidate entities/relationships and publish a portable Explorer bundle.
 
-Live mode uses native LLM extraction, RDFExporter, LLM OntologyGenerator and
-validate_graph. Replay verifies the saved bundle without contacting a model.
+Live mode uses native LLM extraction, independent semantic coverage review,
+qualified RDF, LLM OntologyGenerator and validate_graph. Replay verifies the
+saved bundle without contacting a model.
 Provider credentials are supplied privately and never included in the bundle.
 """
 
@@ -40,6 +41,10 @@ from semantica.semantic_extract.candidate_profile import (
     extract_candidate_facts,
     replay_candidate_facts,
 )
+from semantica.semantic_extract.candidate_coverage import (
+    CoverageReviewError,
+)
+from semantica.semantic_extract.candidate_coverage_stages import review_candidate_facts
 
 
 BUNDLE_VERSION = "candidate-facts-bundle-v2"
@@ -89,6 +94,10 @@ def _read_config(path):
         raise ExportError(
             "Private configuration must specify provider/model and only LLM generation settings."
         )
+    if config.get("thinking") is not None and config["thinking"] not in (
+        {"type": "enabled"}, {"type": "disabled"},
+    ):
+        raise ExportError("thinking must specify only an enabled or disabled type.")
     return {key: value for key, value in config.items() if key != "method"}
 
 
@@ -143,6 +152,7 @@ def run(args):
                 "name",
                 "base_uri",
                 "config",
+                "review_bundle",
             )
         ):
             raise ExportError(
@@ -182,6 +192,42 @@ def run(args):
                 "Replay extraction does not reproduce the saved candidate facts."
             )
         mode = "offline_replay"
+    elif getattr(args, "review_bundle", None):
+        if args.config is None or any(
+            getattr(args, key, None) is not None
+            for key in ("source", "source_id", "title", "version", "name", "base_uri")
+        ):
+            raise ExportError(
+                "Review uses a private config and the source identity saved in its input bundle."
+            )
+        config = _read_config(args.config)
+        inputs = read_candidate_bundle(args.review_bundle)
+        previous = json.loads(inputs["SUMMARY.json"])
+        if previous.get("format_version") != BUNDLE_VERSION:
+            raise ExportError("Coverage review requires a qualified candidate bundle.")
+        source = previous["source"]
+        options = previous["generation"]
+        source_bytes = inputs["source.txt"]
+        manifest = json.loads(inputs["source-manifest.json"])
+        expected_source = {
+            "source_id": source.get("source_id"),
+            "source_sha256": _digest(source_bytes),
+            "path": "source.txt",
+            "title": source.get("title"),
+            "version": source.get("version"),
+        }
+        if source.get("sha256") != expected_source["source_sha256"] or manifest.get(
+            "sources"
+        ) != [expected_source]:
+            raise ExportError("Review source identity differs from its saved material.")
+        extracted = replay_candidate_facts(
+            source_bytes.decode("utf-8"), json.loads(inputs["extraction.json"]),
+            source_id=source["source_id"],
+        )
+        if extracted["facts"] != json.loads(inputs["facts.json"]):
+            raise ExportError("Review input facts do not match the original model responses.")
+        extracted = review_candidate_facts(source_bytes.decode("utf-8"), extracted, **config)
+        mode = "llm_coverage_review"
     else:
         if args.source is None or not args.source_id or args.config is None:
             raise ExportError("Generation requires --source, --source-id and --config.")
@@ -199,7 +245,7 @@ def run(args):
             "qualified_statements": True,
         }
         extracted = extract_candidate_facts(
-            source_bytes.decode("utf-8"), source_id=args.source_id, **config
+            source_bytes.decode("utf-8"), source_id=args.source_id, review_coverage=True, **config
         )
         mode = "llm"
 
@@ -278,11 +324,25 @@ def run(args):
     }
     if preservation is not None:
         files["preservation.json"] = _json_bytes(preservation)
+    if "coverage_review" in extracted["extraction"]:
+        files["coverage-review.json"] = _json_bytes(extracted["extraction"]["coverage_review"])
+        files["coverage-review-prompt.txt"] = extracted["prompts"]["coverage_review"].encode(
+            "utf-8"
+        )
+        for stage in extracted["extraction"]["coverage_review"].get("stages", []):
+            name = stage["name"]
+            files[f"coverage-{name}.json"] = _json_bytes(stage)
+            files[f"coverage-{name}-prompt.txt"] = extracted["prompts"]["coverage_" + name].encode("utf-8")
     if saved_files is not None:
         for name in (
             "entity-prompt.txt",
             "relationship-prompt.txt",
             "ontology-prompt.txt",
+            *(
+                ["coverage-review.json", "coverage-review-prompt.txt"]
+                if "coverage_review" in extracted["extraction"] else []
+            ),
+            *(name for name in files if name.startswith("coverage-") and name not in {"coverage-review.json", "coverage-review-prompt.txt"}),
         ):
             if saved_files.get(name) != files[name]:
                 raise ExportError(
@@ -323,6 +383,24 @@ def run(args):
             "against the same extracted facts and cannot detect facts the model omitted. "
             "Schema conformance does not prove independent business completeness."
         )
+    if "coverage_review" in extracted["extraction"]:
+        review = extracted["extraction"]["coverage_review"]
+        audit = review["stages"][-1]["response"] if "stages" in review else review["response"]
+        summary["semantic_coverage_review"] = {
+            "prompt_version": review["prompt_version"],
+            "provider": review["provider"],
+            "model": review["model"],
+            "stages": len(review.get("stages", [])),
+            "entity_reviews": len(audit["entity_reviews"]),
+            "clause_reviews": len(audit["clause_reviews"]),
+            "competency_reviews": len(audit.get("competency_reviews", [])),
+            "unresolved": sum(
+                item["status"] == "unresolved"
+                for group in ("entity_reviews", "clause_reviews", "competency_reviews")
+                for item in audit.get(group, [])
+            ),
+            "status": "llm_candidate_review",
+        }
     files["SUMMARY.json"] = _json_bytes(summary)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -349,6 +427,10 @@ def main(argv=None):
     )
     parser.add_argument("--source", type=Path, help="Original UTF-8 document")
     parser.add_argument(
+        "--review-bundle", type=Path,
+        help="With --config, independently review an existing bundle's original LLM extraction",
+    )
+    parser.add_argument(
         "--source-id", help="Stable source identity; never interpreted as a path"
     )
     parser.add_argument("--title", help="Known material title")
@@ -368,6 +450,25 @@ def main(argv=None):
     logging.disable(logging.CRITICAL)
     try:
         summary = run(args)
+    except CoverageReviewError as error:
+        diagnostic = args.output.with_name(args.output.name + ".coverage-rejected.json")
+        diagnostic.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with diagnostic.open("x", encoding="utf-8") as stream:
+                json.dump(
+                    {"error": str(error), "review": error.record}, stream,
+                    ensure_ascii=False, indent=2,
+                )
+        except FileExistsError:
+            print(
+                "A previous rejected coverage review is already saved; it was not overwritten.",
+                file=sys.stderr,
+            )
+        print(
+            f"Coverage review rejected: {error}; no bundle published. Diagnostic: {diagnostic}",
+            file=sys.stderr,
+        )
+        return 2
     except ExportError as error:
         print(str(error), file=sys.stderr)
         return 2
